@@ -1,0 +1,76 @@
+{
+  "users": [
+    {
+      "id": "6992f4c23c7a19f465215dd4",
+      "fullName": "Super Admin",
+      "role": "SUPER_ADMIN",
+      "companyId": "6992f4c23c7a19f465215dd3"
+    },
+    {
+      "id": "69942daf5e2a8c1760a7b7f7",
+      "fullName": "demo Admin",
+      "role": "COMPANY_OWNER",
+      "companyId": "69942daf5e2a8c1760a7b7f5"
+    },
+    {
+      "id": "699432f1a9ffc9ee127e5462",
+      "fullName": "test",
+      "role": "CLIENT",
+      "companyId": "69942b83c6dd4ff139f0761d"
+    },
+    {
+      "id": "69943f0fe2e8450ab883bdfd",
+      "fullName": "Jay Admin",
+      "role": "COMPANY_OWNER",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "69944277e2e8450ab883bee5",
+      "fullName": "Forman",
+      "role": "FOREMAN",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "699442d6e2e8450ab883bef1",
+      "fullName": "Project Manager",
+      "role": "PM",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "69944356e2e8450ab883bf5d",
+      "fullName": "Client",
+      "role": "CLIENT",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "69944390e2e8450ab883bf66",
+      "fullName": "Worker",
+      "role": "WORKER",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "6994592d652c2a2c20b6c464",
+      "fullName": "Engineer User",
+      "role": "ENGINEER",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "699833d09fb315760a312ee9",
+      "fullName": "Sam Subcontractor",
+      "role": "SUBCONTRACTOR",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    },
+    {
+      "id": "699a391e6e981c331d652d3a",
+      "fullName": "rob",
+      "role": "WORKER",
+      "companyId": "69943f0fe2e8450ab883bdfb"
+    }
+  ],
+  "companies": [
+    {
+      "id": "69943f0fe2e8450ab883bdfb",
+      "name": "Jay"
+    }
+  ]
+}
