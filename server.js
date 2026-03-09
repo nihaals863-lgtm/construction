@@ -43,26 +43,41 @@ const app = express();
 const server = http.createServer(app);
 
 // Socket.io Setup
+
+
+
 const io = new Server(server, {
-    cors: {
-        origin: "*", // Allow all origins for now (adjust for production)
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
-    }
+  cors: {
+    origin: [
+      "https://construction.kiaantechnology.com",
+      "http://localhost:3000"
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    credentials: true
+  }
 });
 
 // Connect to Database handled at bottom of file
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+
+const corsOptions = {
+  origin: [
+    "https://construction.kiaantechnology.com",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan('dev'));
 
 // Static files
-app.use('/uploads', cors(), express.static(path.join(__dirname, 'uploads')));
-
-// Routes
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/projects', projectRoutes);
