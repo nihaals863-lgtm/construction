@@ -50,7 +50,7 @@ const io = new Server(server, {
   cors: {
     origin: [
       "https://construction.kiaantechnology.com",
-      "http://localhost:3000"
+      "http://localhost:5173"
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true
@@ -65,7 +65,7 @@ app.use(helmet());
 const corsOptions = {
   origin: [
     "https://construction.kiaantechnology.com",
-    "http://localhost:3000"
+    "http://localhost:5173"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
