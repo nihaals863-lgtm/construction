@@ -66,7 +66,7 @@ app.use(helmet());
 const corsOptions = {
   origin: [
     "https://construction.kiaantechnology.com",
-    "http://localhost:5173"
+    "http://localhost:5173",
     "https://kaal.wenbear.online"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
