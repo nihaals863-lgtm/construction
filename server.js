@@ -51,7 +51,8 @@ const io = new Server(server, {
     origin: [
       "https://construction.kiaantechnology.com",
       "http://localhost:5173",
-      "https://kaal.wenbear.online"
+      "https://kaal.wenbear.online",
+      "https://kaal.ca"
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true
@@ -67,7 +68,8 @@ const corsOptions = {
   origin: [
     "https://construction.kiaantechnology.com",
     "http://localhost:5173",
-    "https://kaal.wenbear.online"
+    "https://kaal.wenbear.online",
+    "https://kaal.ca"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
