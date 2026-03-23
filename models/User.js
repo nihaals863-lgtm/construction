@@ -62,6 +62,9 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);
 };
 
+// Indexes for querying staff directories quickly
+userSchema.index({ companyId: 1, role: 1, isActive: 1 });
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;

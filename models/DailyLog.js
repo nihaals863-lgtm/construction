@@ -50,6 +50,10 @@ const dailyLogSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Indexes for fast date range and project lookups
+dailyLogSchema.index({ companyId: 1, projectId: 1, date: -1 });
+dailyLogSchema.index({ companyId: 1, date: -1 });
+
 const DailyLog = mongoose.model('DailyLog', dailyLogSchema);
 
 module.exports = DailyLog;

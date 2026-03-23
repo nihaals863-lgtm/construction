@@ -8,6 +8,7 @@ const {
     assignTask,
     updateTask,
     deleteTask,
+    reorderTasks,
     getSubTasks,
     createSubTask,
     updateSubTask,
@@ -16,6 +17,8 @@ const {
 const { protect, authorize, checkPermission } = require('../middlewares/authMiddleware');
 
 router.use(protect);
+
+router.patch('/reorder', reorderTasks);
 
 // Must be before /:id to avoid route conflict
 router.get('/my-tasks', getMyTasks);

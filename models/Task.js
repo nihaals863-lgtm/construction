@@ -58,6 +58,10 @@ const taskSchema = new mongoose.Schema({
         enum: ['todo', 'in_progress', 'review', 'completed'],
         default: 'todo'
     },
+    position: {
+        type: Number,
+        default: 0
+    },
     priority: {
         type: String,
         enum: ['Low', 'Medium', 'High'],
@@ -89,6 +93,11 @@ const taskSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// Indexes for performance
+taskSchema.index({ companyId: 1, projectId: 1, status: 1 });
+taskSchema.index({ companyId: 1, assignedTo: 1 });
+taskSchema.index({ companyId: 1, dueDate: 1 });
 
 const Task = mongoose.model('Task', taskSchema);
 

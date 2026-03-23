@@ -74,6 +74,11 @@ const projectSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Indexes for quick filtering
+projectSchema.index({ companyId: 1, status: 1 });
+projectSchema.index({ companyId: 1, pmId: 1 });
+projectSchema.index({ companyId: 1, clientId: 1 });
+
 const Project = mongoose.model('Project', projectSchema);
 
 module.exports = Project;

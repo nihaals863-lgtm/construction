@@ -26,7 +26,7 @@ const getDailyLogs = async (req, res, next) => {
 
         const logs = await DailyLog.find(query)
             .populate('projectId', 'name')
-            .populate('reportedBy', 'fullName')
+            .populate('reportedBy', 'fullName role')
             .sort({ date: -1 });
 
         res.json(logs);

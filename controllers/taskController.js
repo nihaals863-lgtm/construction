@@ -63,7 +63,7 @@ const getTasks = async (req, res, next) => {
             .populate('assignedTo', 'fullName email role')
             .populate('createdBy', 'fullName')
             .populate('assignedBy', 'fullName')
-            .sort({ dueDate: 1, createdAt: -1 });
+            .sort({ position: 1, dueDate: 1, createdAt: -1 });
 
         res.json(tasks);
     } catch (error) {
@@ -146,7 +146,7 @@ const getProjectTasks = async (req, res, next) => {
 // @access  Private (Admin, PM, Foreman)
 const createTask = async (req, res, next) => {
     try {
-        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate } = req.body;
+        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate, subTasksList } = req.body;
 
         if (!projectId) {
             res.status(400);
@@ -205,6 +205,21 @@ const createTask = async (req, res, next) => {
             await syncProjectParticipants(projectId);
         } catch (syncError) {
             console.error('Task Create: Failed to sync chat participants:', syncError);
+        }
+
+        // Generate auto steps if passed via subTasksList (Task Template feature)
+        if (subTasksList && Array.isArray(subTasksList) && subTasksList.length > 0) {
+            const steps = subTasksList.map(step => ({
+                taskId: task._id,
+                companyId: req.user.companyId,
+                title: step.title,
+                remarks: step.remarks || '',
+                priority: step.priority || 'Medium',
+                createdBy: req.user._id
+            }));
+            await SubTask.insertMany(steps);
+            task.subTaskCount = steps.length;
+            await task.save();
         }
 
         const populated = await Task.findById(task._id)
@@ -406,6 +421,35 @@ const deleteTask = async (req, res, next) => {
         });
 
         res.json({ message: 'Task deleted successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Reorder tasks
+// @route   PATCH /api/tasks/reorder
+// @access  Private
+const reorderTasks = async (req, res, next) => {
+    try {
+        const { tasks } = req.body; // Array of { id, status, position }
+        
+        if (!Array.isArray(tasks)) {
+            res.status(400);
+            throw new Error('Invalid format: Extpected an array of tasks.');
+        }
+
+        const bulkOps = tasks.map((task, index) => ({
+            updateOne: {
+                filter: { _id: task.id, companyId: req.user.companyId },
+                update: { status: task.status, position: task.position !== undefined ? task.position : index }
+            }
+        }));
+
+        if (bulkOps.length > 0) {
+            await Task.bulkWrite(bulkOps);
+        }
+
+        res.json({ message: 'Tasks reordered successfully' });
     } catch (error) {
         next(error);
     }
@@ -645,6 +689,7 @@ module.exports = {
     assignTask,
     updateTask,
     deleteTask,
+    reorderTasks,
     getSubTasks,
     createSubTask,
     updateSubTask,
