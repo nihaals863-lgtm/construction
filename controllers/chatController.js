@@ -6,7 +6,7 @@ const User = require('../models/User');
 const mongoose = require('mongoose');
 
 // @desc    Get chat rooms for the current user
-// @route   GET /api/chat/rooms
+// @route   GET /api/chat
 // @access  Private
 const getChatRooms = async (req, res, next) => {
     try {
@@ -42,6 +42,7 @@ const getChatRooms = async (req, res, next) => {
             let roomName = room.name || 'Chat Room';
             let avatar = null;
             let otherRole = null;
+            let otherUserId = null;
             let hasClient = false;
             let hasSub = false;
 
@@ -57,6 +58,7 @@ const getChatRooms = async (req, res, next) => {
                         roomName = otherUser.fullName;
                         avatar = otherUser.avatar;
                         otherRole = otherUser.role;
+                        otherUserId = otherUser._id;
                     }
                 }
             } else {
@@ -73,6 +75,7 @@ const getChatRooms = async (req, res, next) => {
                 projectId: room.projectId?._id,
                 projectName: room.projectId?.name,
                 otherRole,
+                otherUserId,
                 hasClient,
                 hasSub,
                 lastMessage: lastMessage ? {
@@ -247,10 +250,22 @@ const getOrCreateDirectRoom = async (req, res, next) => {
         ]);
 
         if (existingParticipants.length > 0) {
-            // Check if ANY of those rooms are 'DIRECT'
             for (const ep of existingParticipants) {
                 const room = await ChatRoom.findOne({ _id: ep._id, roomType: 'DIRECT' });
-                if (room) return res.json(room);
+                if (room) {
+                    const targetUser = await User.findById(targetUserId).select('fullName role avatar');
+                    return res.json({
+                        id: room._id,
+                        name: targetUser?.fullName || 'Chat',
+                        roomType: 'DIRECT',
+                        isGroup: false,
+                        otherRole: targetUser?.role,
+                        otherUserId: targetUser?._id,
+                        avatar: targetUser?.avatar,
+                        unreadCount: 0,
+                        lastMessage: null
+                    });
+                }
             }
         }
 
@@ -305,6 +320,7 @@ const getOrCreateDirectRoom = async (req, res, next) => {
             isGroup: false,
             otherRole: targetUser.role,
             avatar: targetUser.avatar,
+            otherUserId: targetUser._id,
             unreadCount: 0,
             lastMessage: null
         });

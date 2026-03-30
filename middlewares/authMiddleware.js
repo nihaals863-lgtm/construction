@@ -11,8 +11,10 @@ const protect = async (req, res, next) => {
         ) {
             token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
+            console.log('DEBUG [protect]: Decoded userId:', decoded.userId);
+            
             req.user = await User.findById(decoded.userId).select('-password');
+            console.log('DEBUG [protect]: User found:', req.user ? req.user._id : 'null', 'Role:', req.user ? req.user.role : 'N/A');
 
             if (!req.user) {
                 res.status(401);
@@ -23,11 +25,12 @@ const protect = async (req, res, next) => {
         }
 
         if (!token) {
+            console.log('DEBUG [protect]: No token found in headers');
             res.status(401);
             return next(new Error('Not authorized, no token'));
         }
     } catch (error) {
-        console.error(error);
+        console.error('DEBUG [protect] error:', error.message);
         res.status(401);
         next(new Error('Not authorized, token failed'));
     }
@@ -51,6 +54,12 @@ const checkPermission = (permissionKey) => {
         const Role = require('../models/Role');
 
         try {
+            console.log('DEBUG [checkPermission]: User role:', req.user ? req.user.role : 'MISSING');
+            if (!req.user) {
+                res.status(401);
+                return next(new Error('User not found in req. Check protect middleware.'));
+            }
+
             if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'COMPANY_OWNER') return next();
 
             // 1. Find the permission ID by key

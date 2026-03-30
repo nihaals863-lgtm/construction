@@ -29,6 +29,11 @@ const planSchema = new mongoose.Schema({
     isPopular: {
         type: Boolean,
         default: false
+    },
+    rolePermissions: {
+        type: Map,
+        of: [String], // Keys are Role names (e.g. 'ADMIN'), Values are arrays of permission keys
+        default: {}
     }
 }, {
     timestamps: true

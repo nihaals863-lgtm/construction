@@ -112,16 +112,26 @@ const getStats = async (req, res, next) => {
 
 const approveCompany = async (req, res, next) => {
     try {
-        const company = await Company.findById(req.params.id);
+        let companyId = req.params.id;
+        
+        // Search if the ID belongs to a User (Owner) or directly to a Company
+        const user = await User.findById(req.params.id);
+        if (user && user.role === 'COMPANY_OWNER') {
+            companyId = user.companyId;
+        }
+
+        const company = await Company.findById(companyId);
         if (!company) {
             res.status(404);
             throw new Error('Company not found');
         }
 
+        // Activate Company
         company.subscriptionStatus = 'active';
         await company.save();
 
-        await User.findOneAndUpdate(
+        // Activate Owner User(s)
+        await User.updateMany(
             { companyId: company._id, role: 'COMPANY_OWNER' },
             { isActive: true }
         );
@@ -134,16 +144,26 @@ const approveCompany = async (req, res, next) => {
 
 const rejectCompany = async (req, res, next) => {
     try {
-        const company = await Company.findById(req.params.id);
+        let companyId = req.params.id;
+        
+        // Search if the ID belongs to a User (Owner) or directly to a Company
+        const user = await User.findById(req.params.id);
+        if (user && user.role === 'COMPANY_OWNER') {
+            companyId = user.companyId;
+        }
+
+        const company = await Company.findById(companyId);
         if (!company) {
             res.status(404);
             throw new Error('Company not found');
         }
 
+        // Deactivate Company
         company.subscriptionStatus = 'canceled';
         await company.save();
 
-        await User.findOneAndUpdate(
+        // Deactivate Owner User(s)
+        await User.updateMany(
             { companyId: company._id, role: 'COMPANY_OWNER' },
             { isActive: false }
         );

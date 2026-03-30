@@ -81,7 +81,7 @@ const loginUser = async (req, res, next) => {
         if (user && (await user.matchPassword(password))) {
             if (!user.isActive) {
                 res.status(401);
-                throw new Error('User account is inactive. Contact admin.');
+                throw new Error('Your account is currently under review by the Super Admin. Once all required checks are completed, your access will be approved. Please wait or contact your administrator for updates');
             }
 
             // Check if company's plan is expired
@@ -231,10 +231,17 @@ const updateUser = async (req, res, next) => {
             throw new Error('Not authorized to update this user');
         }
 
-        const updatedUser = await User.findByIdAndUpdate(req.params.id, req.body, {
-            new: true,
-            runValidators: true
-        }).select('-password');
+        // Update fields
+        Object.keys(req.body).forEach(key => {
+            if (key !== '_id' && key !== 'companyId') {
+                user[key] = req.body[key];
+            }
+        });
+
+        await user.save();
+        
+        const updatedUser = user.toObject();
+        delete updatedUser.password;
 
         res.json(updatedUser);
     } catch (error) {
@@ -279,6 +286,27 @@ const createUser = async (req, res, next) => {
             res.status(400);
             throw new Error('Current user does not belong to a company');
         }
+
+        // --- ENFORCE PLAN LIMITS ---
+        const Plan = require('../models/Plan');
+        const company = await Company.findById(req.user.companyId);
+        if (company) {
+            // Safe lookup for plan: check if it's a valid ObjectId or a name string
+            const mongoose = require('mongoose');
+            const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
+                ? { _id: company.subscriptionPlanId }
+                : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+
+            const plan = await Plan.findOne(planQuery);
+            const maxUsers = plan?.maxUsers || 10; // Default limit if plan not found
+
+            const currentUserCount = await User.countDocuments({ companyId: req.user.companyId });
+            if (currentUserCount >= maxUsers) {
+                res.status(403);
+                throw new Error(`User limit reached for your plan (${maxUsers} users). Please upgrade your plan to add more team members.`);
+            }
+        }
+        // ---------------------------
 
         const userExists = await User.findOne({ email });
 
@@ -338,4 +366,34 @@ const updatePassword = async (req, res, next) => {
     }
 };
 
-module.exports = { loginUser, registerUser, registerCompany, getMe, getUsers, updateUser, deleteUser, createUser, updatePassword };
+// @desc    Update current user profile
+// @route   PATCH /api/auth/profile
+// @access  Private
+const updateProfile = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user._id);
+
+        if (!user) {
+            res.status(404);
+            throw new Error('User not found');
+        }
+
+        const { fullName, email, avatar, phone } = req.body;
+
+        if (fullName) user.fullName = fullName;
+        if (email) user.email = email;
+        if (avatar) user.avatar = avatar;
+        if (phone) user.phone = phone;
+
+        await user.save();
+
+        const updatedUser = user.toObject();
+        delete updatedUser.password;
+
+        res.json(updatedUser);
+    } catch (error) {
+        next(error);
+    }
+};
+
+module.exports = { loginUser, registerUser, registerCompany, getMe, getUsers, updateUser, deleteUser, createUser, updatePassword, updateProfile };

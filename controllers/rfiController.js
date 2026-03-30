@@ -170,10 +170,19 @@ const getRFIById = async (req, res, next) => {
 // @access  Private
 const createRFI = async (req, res, next) => {
     try {
+        let attachments = [];
+        if (req.files && req.files.length > 0) {
+            attachments = req.files.map(file => ({
+                name: file.originalname,
+                url: file.path.replace(/\\/g, '/')
+            }));
+        }
+
         const rfi = await RFI.create({
             ...req.body,
             companyId: req.user.companyId,
-            raisedBy: req.user._id
+            raisedBy: req.user._id,
+            attachments
         });
 
         const populated = await RFI.findById(rfi._id)

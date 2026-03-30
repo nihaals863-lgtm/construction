@@ -4,6 +4,7 @@ const SubTask = require('../models/SubTask');
 const Job = require('../models/Job');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
+const JobTask = require('../models/JobTask');
 const { dispatchNotification } = require('../utils/notificationHelper');
 
 // Helper: Validate if assigner can assign to given assignees based on role hierarchy
@@ -28,44 +29,77 @@ const getTasks = async (req, res, next) => {
     try {
         const { role, _id: userId, companyId } = req.user;
         const query = { companyId };
+        const jobTaskQuery = { companyId };
 
-        if (req.query.projectId) query.projectId = req.query.projectId;
-        if (req.query.status) query.status = req.query.status;
-        if (req.query.priority) query.priority = req.query.priority;
-        if (req.query.assignedRoleType) query.assignedRoleType = req.query.assignedRoleType;
+        if (req.query.projectId) {
+            query.projectId = req.query.projectId;
+            const projectJobs = await Job.find({ projectId: req.query.projectId }).distinct('_id');
+            jobTaskQuery.jobId = { $in: projectJobs };
+        }
+        
+        if (req.query.status) {
+            query.status = req.query.status;
+            const statusMap = { todo: 'pending', in_progress: 'in_progress', completed: 'completed' };
+            if (statusMap[req.query.status]) jobTaskQuery.status = statusMap[req.query.status];
+        }
+        
+        if (req.query.priority) {
+            query.priority = req.query.priority;
+            jobTaskQuery.priority = req.query.priority.toLowerCase();
+        }
 
-        // WORKER or SUBCONTRACTOR: only own assigned tasks OR tasks where they have sub-tasks
         if (['WORKER', 'SUBCONTRACTOR'].includes(role)) {
             const subTaskTaskIds = await SubTask.find({ assignedTo: userId, companyId }).distinct('taskId');
             query.$or = [
                 { assignedTo: userId },
                 { _id: { $in: subTaskTaskIds } }
             ];
-        }
-        // FOREMAN: own tasks + tasks assigned to workers in their managed jobs
-        else if (role === 'FOREMAN') {
+            jobTaskQuery.assignedTo = userId;
+        } else if (role === 'FOREMAN') {
             const managedJobs = await Job.find({ foremanId: userId, companyId }).select('assignedWorkers');
             const workerIds = managedJobs.flatMap(j => j.assignedWorkers || []);
             const allIds = [userId, ...workerIds];
-
-            // Also include tasks where they have sub-tasks
             const subTaskTaskIds = await SubTask.find({ assignedTo: userId, companyId }).distinct('taskId');
 
             query.$or = [
                 { assignedTo: { $in: allIds } },
                 { _id: { $in: subTaskTaskIds } }
             ];
+            jobTaskQuery.$or = [
+                { assignedTo: { $in: allIds } },
+                { assignedForeman: userId }
+            ];
         }
-        // PM / COMPANY_OWNER / SUPER_ADMIN / ENGINEER: all company tasks
 
-        const tasks = await Task.find(query)
-            .populate('projectId', 'name')
-            .populate('assignedTo', 'fullName email role')
-            .populate('createdBy', 'fullName')
-            .populate('assignedBy', 'fullName')
-            .sort({ position: 1, dueDate: 1, createdAt: -1 });
+        const [tasks, jobTasksData] = await Promise.all([
+            Task.find(query)
+                .populate('projectId', 'name')
+                .populate('assignedTo', 'fullName email role')
+                .populate('createdBy', 'fullName')
+                .populate('assignedBy', 'fullName')
+                .sort({ position: 1, dueDate: 1, createdAt: -1 })
+                .lean(),
+            JobTask.find(jobTaskQuery)
+                .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
+                .populate('assignedTo', 'fullName email role')
+                .populate('createdBy', 'fullName')
+                .sort({ dueDate: 1, createdAt: -1 })
+                .lean()
+        ]);
 
-        res.json(tasks);
+        const mappedJobTasks = jobTasksData.map(jt => ({
+            ...jt,
+            _id: jt._id,
+            projectId: jt.jobId?.projectId,
+            jobName: jt.jobId?.name,
+            assignedTo: jt.assignedTo ? [jt.assignedTo] : [],
+            status: jt.status === 'pending' ? 'todo' : jt.status,
+            priority: jt.priority ? (jt.priority.charAt(0).toUpperCase() + jt.priority.slice(1)) : 'Medium',
+            category: 'TASK',
+            isJobTask: true
+        }));
+
+        res.json([...tasks, ...mappedJobTasks]);
     } catch (error) {
         next(error);
     }
@@ -146,31 +180,45 @@ const getProjectTasks = async (req, res, next) => {
 // @access  Private (Admin, PM, Foreman)
 const createTask = async (req, res, next) => {
     try {
-        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate, subTasksList } = req.body;
+        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate, subTasksList, category } = req.body;
 
         if (!projectId) {
             res.status(400);
             throw new Error('projectId is required');
         }
 
-        const assignedToArr = assignedTo
+        const assignedToArr = (assignedTo
             ? (Array.isArray(assignedTo) ? assignedTo : [assignedTo]).filter(Boolean)
-            : [];
+            : []).map(id => id.toString());
 
-        // --- Role Hierarchy Validation ---
-        const hierarchyError = await validateAssignmentHierarchy(req.user.role, assignedToArr);
-        if (hierarchyError) {
-            return res.status(403).json({ message: hierarchyError });
+        // Default to self if it's a TODO and no one is assigned
+        if (category === 'TODO' && assignedToArr.length === 0) {
+            assignedToArr.push(req.user._id.toString());
+        }
+
+        // --- Role Hierarchy & Permission Validation ---
+        // Workers/Subcontractors can ONLY assign to themselves
+        if (['WORKER', 'SUBCONTRACTOR'].includes(req.user.role)) {
+            if (assignedToArr.length > 1 || (assignedToArr.length === 1 && assignedToArr[0] !== req.user._id.toString())) {
+                return res.status(403).json({ message: 'Workers can only create personal tasks assigned to themselves.' });
+            }
+        } else {
+            // Check role hierarchy for management roles
+            const hierarchyError = await validateAssignmentHierarchy(req.user.role, assignedToArr);
+            if (hierarchyError) {
+                return res.status(403).json({ message: hierarchyError });
+            }
         }
 
         const task = await Task.create({
             companyId: req.user.companyId,
             projectId,
             title,
+            category: category || 'TASK',
             description: description || '',
             assignedTo: assignedToArr,
             assignedRoleType: assignedRoleType || '',
-            assignedBy: assignedToArr.length > 0 ? req.user._id : undefined,
+            assignedBy: req.user._id,
             priority: priority || 'Medium',
             status: status || 'todo',
             dueDate: dueDate || undefined,
@@ -351,6 +399,9 @@ const updateTask = async (req, res, next) => {
             task.statusHistory.push({ status: req.body.status, changedBy: userId });
         }
 
+        const oldStartDate = task.startDate;
+        const oldDueDate = task.dueDate;
+
         Object.assign(task, req.body);
         // Re-resolve assignedTo as array
         if (req.body.assignedTo && !Array.isArray(req.body.assignedTo)) {
@@ -358,6 +409,35 @@ const updateTask = async (req, res, next) => {
         }
 
         await task.save();
+
+        // Auto-shift logic
+        if ((req.body.startDate && String(oldStartDate) !== String(task.startDate)) || 
+            (req.body.dueDate && String(oldDueDate) !== String(task.dueDate))) {
+            
+            const shiftDependencies = async (currentTaskId, newStartDate, newDueDate) => {
+                if (!newStartDate || !newDueDate) return;
+                
+                const deps = await Task.find({ dependencies: currentTaskId, companyId: req.user.companyId });
+                for (const dep of deps) {
+                    if (!dep.startDate || !dep.dueDate) continue;
+                    
+                    const depDuration = new Date(dep.dueDate) - new Date(dep.startDate);
+                    
+                    const shiftedStart = new Date(newDueDate);
+                    shiftedStart.setDate(shiftedStart.getDate() + 1);
+                    
+                    const shiftedDue = new Date(shiftedStart.getTime() + depDuration);
+                    
+                    dep.startDate = shiftedStart;
+                    dep.dueDate = shiftedDue;
+                    
+                    await dep.save();
+                    await shiftDependencies(dep._id, dep.startDate, dep.dueDate);
+                }
+            };
+            
+            await shiftDependencies(task._id, task.startDate, task.dueDate);
+        }
 
         // Sync Chat Participants if assignedTo changed
         if (req.body.assignedTo) {
@@ -432,7 +512,7 @@ const deleteTask = async (req, res, next) => {
 const reorderTasks = async (req, res, next) => {
     try {
         const { tasks } = req.body; // Array of { id, status, position }
-        
+
         if (!Array.isArray(tasks)) {
             res.status(400);
             throw new Error('Invalid format: Extpected an array of tasks.');
@@ -540,7 +620,7 @@ const recalcSubTaskProgress = async (parentSubTaskId) => {
 
 const createSubTask = async (req, res, next) => {
     try {
-        const { title, assignedTo, dueDate, remarks, priority, parentSubTaskId } = req.body;
+        const { title, assignedTo, dueDate, startDate, remarks, priority, parentSubTaskId } = req.body;
 
         const parentTask = await Task.findById(req.params.id);
         if (!parentTask) {
@@ -563,6 +643,7 @@ const createSubTask = async (req, res, next) => {
             companyId: req.user.companyId,
             title,
             assignedTo: assignedTo || null,
+            startDate: startDate || undefined,
             dueDate: dueDate || undefined,
             remarks: remarks || '',
             priority: priority || 'Medium',
@@ -681,6 +762,164 @@ const deleteSubTask = async (req, res, next) => {
     }
 };
 
+// @desc    Get schedule data
+// @route   GET /api/tasks/schedule
+// @access  Private
+const getSchedule = async (req, res, next) => {
+    try {
+        const { role, _id: userId, companyId } = req.user;
+        const query = { companyId };
+        const jobTaskQuery = { companyId };
+
+        if (req.query.projectId) {
+            query.projectId = req.query.projectId;
+            const projectJobs = await Job.find({ projectId: req.query.projectId }).distinct('_id');
+            jobTaskQuery.jobId = { $in: projectJobs };
+        }
+        
+        if (req.query.status) {
+            query.status = req.query.status;
+            const statusMap = { todo: 'pending', in_progress: 'in_progress', completed: 'completed' };
+            if (statusMap[req.query.status]) jobTaskQuery.status = statusMap[req.query.status];
+        }
+        
+        if (req.query.priority) {
+            query.priority = req.query.priority;
+            jobTaskQuery.priority = req.query.priority.toLowerCase();
+        }
+        
+        if (req.query.category) query.category = req.query.category;
+
+        // Role-based visibility
+        if (['WORKER', 'SUBCONTRACTOR'].includes(role)) {
+            const subTaskTaskIds = await SubTask.find({ assignedTo: userId, companyId }).distinct('taskId');
+            query.$or = [
+                { assignedTo: userId },
+                { _id: { $in: subTaskTaskIds } }
+            ];
+            jobTaskQuery.assignedTo = userId;
+        } else if (role === 'FOREMAN') {
+            const managedJobs = await Job.find({ foremanId: userId, companyId }).select('assignedWorkers');
+            const workerIds = managedJobs.flatMap(j => j.assignedWorkers || []);
+            const allIds = [userId, ...workerIds];
+            const subTaskTaskIds = await SubTask.find({ assignedTo: userId, companyId }).distinct('taskId');
+
+            query.$or = [
+                { assignedTo: { $in: allIds } },
+                { _id: { $in: subTaskTaskIds } }
+            ];
+            jobTaskQuery.$or = [
+                { assignedTo: { $in: allIds } },
+                { assignedForeman: userId }
+            ];
+        }
+
+        const [tasks, jobTasksData, subTasks] = await Promise.all([
+            Task.find(query)
+                .select('_id title startDate dueDate status priority assignedTo dependencies position createdAt projectId')
+                .populate('assignedTo', 'fullName')
+                .populate('projectId', 'name')
+                .sort({ position: 1, dueDate: 1, createdAt: -1 })
+                .lean(),
+            JobTask.find(jobTaskQuery)
+                .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
+                .populate('assignedTo', 'fullName')
+                .sort({ dueDate: 1, createdAt: -1 })
+                .lean(),
+            SubTask.find({ companyId }).lean() // More efficient than querying per task if many
+        ]);
+
+        const formatted = tasks.map(t => ({
+            id: t._id,
+            title: t.title,
+            startDate: t.startDate,
+            endDate: t.dueDate,
+            dueDate: t.dueDate,
+            status: t.status,
+            priority: t.priority,
+            assignedTo: t.assignedTo,
+            projectId: t.projectId,
+            dependencies: t.dependencies || [],
+            subTasks: subTasks.filter(st => st.taskId?.toString() === t._id.toString())
+        }));
+
+        const jobFormatted = jobTasksData.map(jt => ({
+            id: jt._id,
+            title: jt.title,
+            startDate: jt.createdAt, // JobTask might not have startDate, use creation date as fallback
+            endDate: jt.dueDate,
+            dueDate: jt.dueDate,
+            status: jt.status === 'pending' ? 'todo' : jt.status,
+            priority: jt.priority ? (jt.priority.charAt(0).toUpperCase() + jt.priority.slice(1)) : 'Medium',
+            assignedTo: jt.assignedTo ? [jt.assignedTo] : [],
+            projectId: jt.jobId?.projectId,
+            jobName: jt.jobId?.name,
+            dependencies: [],
+            subTasks: [],
+            isJobTask: true
+        }));
+
+        res.json([...formatted, ...jobFormatted]);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Add dependency
+// @route   POST /api/tasks/:id/dependency
+// @access  Private
+const addDependency = async (req, res, next) => {
+    try {
+        const { dependsOnTaskId } = req.body;
+        
+        if (!dependsOnTaskId) {
+            res.status(400);
+            throw new Error('dependsOnTaskId is required');
+        }
+        
+        if (dependsOnTaskId === req.params.id) {
+            res.status(400);
+            throw new Error('A task cannot depend on itself');
+        }
+
+        const depTask = await Task.findById(dependsOnTaskId);
+        if (!depTask) {
+            res.status(404);
+            throw new Error('Dependency task not found');
+        }
+
+        const checkCircular = async (taskId, targetId) => {
+            if (taskId.toString() === targetId.toString()) return true;
+            const t = await Task.findById(taskId);
+            if (!t) return false;
+            for (const dId of (t.dependencies || [])) {
+                if (await checkCircular(dId, targetId)) return true;
+            }
+            return false;
+        };
+        
+        if (await checkCircular(dependsOnTaskId, req.params.id)) {
+            res.status(400);
+            throw new Error('Circular dependency detected');
+        }
+
+        const task = await Task.findOneAndUpdate(
+            { _id: req.params.id, companyId: req.user.companyId },
+            { $addToSet: { dependencies: dependsOnTaskId } },
+            { new: true }
+        );
+
+        if (!task) {
+            res.status(404);
+            throw new Error('Task not found');
+        }
+
+        res.json(task);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getTasks,
     getMyTasks,
@@ -693,5 +932,7 @@ module.exports = {
     getSubTasks,
     createSubTask,
     updateSubTask,
-    deleteSubTask
+    deleteSubTask,
+    getSchedule,
+    addDependency
 };

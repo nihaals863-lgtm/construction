@@ -21,7 +21,11 @@ const tradeBidSchema = new mongoose.Schema({
         required: true
     },
     notes: String,
-    supportingDocument: String,
+    attachments: [{
+        name: String,
+        url: String,
+        fileType: String
+    }],
     status: {
         type: String,
         enum: ['Pending', 'Approved', 'Rejected'],

@@ -40,11 +40,28 @@ const getDailyLogs = async (req, res, next) => {
 // @access  Private (Foreman, PM)
 const createDailyLog = async (req, res, next) => {
     try {
-        const log = await DailyLog.create({
+        let photos = [];
+        if (req.files && req.files.length > 0) {
+            photos = req.files.map(file => file.path || file.secure_url);
+        }
+
+        const logData = {
             ...req.body,
+            photos,
             companyId: req.user.companyId,
             reportedBy: req.user._id
-        });
+        };
+
+        // If location is passed as a string (JSON), parse it
+        if (typeof req.body.location === 'string') {
+            try {
+                logData.location = JSON.parse(req.body.location);
+            } catch (e) {
+                console.error('Error parsing location:', e);
+            }
+        }
+
+        const log = await DailyLog.create(logData);
         res.status(201).json(log);
     } catch (error) {
         next(error);

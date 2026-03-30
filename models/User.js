@@ -43,6 +43,9 @@ const userSchema = new mongoose.Schema({
     isActive: {
         type: Boolean,
         default: true
+    },
+    avatar: {
+        type: String
     }
 }, {
     timestamps: true

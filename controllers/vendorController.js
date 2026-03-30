@@ -6,9 +6,19 @@ const Drawing = require('../models/Drawing');
 // @route   POST /api/vendors
 exports.createVendor = async (req, res) => {
     try {
+        let attachments = [];
+        if (req.files && req.files.length > 0) {
+            attachments = req.files.map(file => ({
+                name: file.originalname,
+                url: file.path.replace(/\\/g, '/'),
+                fileType: file.mimetype
+            }));
+        }
+
         const vendor = new Vendor({
             ...req.body,
-            companyId: req.user.companyId || req.user.company?._id
+            companyId: req.user.companyId || req.user.company?._id,
+            attachments
         });
         await vendor.save();
         res.status(201).json(vendor);
@@ -45,9 +55,23 @@ exports.getVendors = async (req, res) => {
 // @route   PATCH /api/vendors/:id
 exports.updateVendor = async (req, res) => {
     try {
+        const updateData = { ...req.body };
+        
+        if (req.files && req.files.length > 0) {
+            const newAttachments = req.files.map(file => ({
+                name: file.originalname,
+                url: file.path.replace(/\\/g, '/'),
+                fileType: file.mimetype
+            }));
+            
+            // If we want to APPEND to existing:
+            const existingVendor = await Vendor.findById(req.params.id);
+            updateData.attachments = [...(existingVendor.attachments || []), ...newAttachments];
+        }
+
         const vendor = await Vendor.findOneAndUpdate(
             { _id: req.params.id, companyId: req.user.companyId },
-            req.body,
+            updateData,
             { new: true }
         );
         if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
@@ -96,6 +120,15 @@ exports.sendDrawingToTrades = async (req, res) => {
 exports.submitBid = async (req, res) => {
     try {
         const { drawingId, vendorId, bidAmount, notes, companyId } = req.body;
+        
+        let attachments = [];
+        if (req.files && req.files.length > 0) {
+            attachments = req.files.map(file => ({
+                name: file.originalname,
+                url: file.path.replace(/\\/g, '/'),
+                fileType: file.mimetype
+            }));
+        }
 
         const bid = new TradeBid({
             companyId,
@@ -103,6 +136,7 @@ exports.submitBid = async (req, res) => {
             vendorId,
             bidAmount,
             notes,
+            attachments,
             status: 'Pending'
         });
 

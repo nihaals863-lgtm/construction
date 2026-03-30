@@ -13,6 +13,11 @@ const taskSchema = new mongoose.Schema({
         ref: 'Company',
         required: true
     },
+    category: {
+        type: String,
+        enum: ['TASK', 'TODO'],
+        default: 'TASK'
+    },
     projectId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project',
@@ -53,6 +58,10 @@ const taskSchema = new mongoose.Schema({
     dueDate: {
         type: Date
     },
+    dependencies: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Task'
+    }],
     status: {
         type: String,
         enum: ['todo', 'in_progress', 'review', 'completed'],

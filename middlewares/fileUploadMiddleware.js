@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 // Ensure uploads directory exists
-const uploadDir = 'uploads/drawings';
+const uploadDir = 'uploads/general';
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -19,12 +19,12 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    const allowedExtensions = ['.pdf', '.dwg', '.dxf', '.jpg', '.jpeg', '.png'];
+    const allowedExtensions = ['.pdf', '.dwg', '.dxf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedExtensions.includes(ext)) {
         cb(null, true);
     } else {
-        cb(new Error('Invalid file type! Allowed: PDF, DWG, DXF, JPG, PNG'), false);
+        cb(new Error('Invalid file type! Allowed: PDF, DWG, DXF, JPG, PNG, DOC, DOCX, XLS'), false);
     }
 };
 

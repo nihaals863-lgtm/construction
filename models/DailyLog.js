@@ -42,6 +42,12 @@ const dailyLogSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    photos: [String],
+    location: {
+        latitude: Number,
+        longitude: Number,
+        address: String
+    },
     verifiedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

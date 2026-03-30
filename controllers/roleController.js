@@ -3,6 +3,8 @@ const Permission = require('../models/Permission');
 const RolePermission = require('../models/RolePermission');
 const UserPermission = require('../models/UserPermission');
 const User = require('../models/User');
+const Company = require('../models/Company');
+const Plan = require('../models/Plan');
 
 // @desc    Get all roles
 // @route   GET /api/roles
@@ -221,7 +223,46 @@ const fetchUserPermissions = async (user) => {
         }
     });
 
-    return Array.from(permissions);
+    const finalPermissions = Array.from(permissions);
+
+    // PLAN FILTERING:
+    // If the user belongs to a company, filter their permissions against the company's subscription plan.
+    if (user.companyId) {
+        try {
+            const company = await Company.findById(user.companyId);
+            if (company && company.subscriptionPlanId) {
+                const mongoose = require('mongoose');
+                const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
+                    ? { _id: company.subscriptionPlanId }
+                    : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+
+                const plan = await Plan.findOne(planQuery);
+                if (plan && plan.rolePermissions && plan.rolePermissions instanceof Map) {
+                    // Map company roles to plan keys
+                    const roleKey = user.role.toUpperCase().replace(/\s/g, '_');
+                    
+                    // Search for permissions in the plan using the role key or common aliases
+                    let allowedByPlan = plan.rolePermissions.get(roleKey);
+                    
+                    // Fallbacks for legacy plan versions or naming differences
+                    if (!allowedByPlan) {
+                        if (roleKey === 'COMPANY_OWNER') allowedByPlan = plan.rolePermissions.get('ADMIN');
+                        if (roleKey === 'PM') allowedByPlan = plan.rolePermissions.get('PROJECT_MANAGER');
+                    }
+                    
+                    // If the plan has specific permissions for this role, filter against it
+                    if (allowedByPlan && Array.isArray(allowedByPlan)) {
+                        return finalPermissions.filter(p => allowedByPlan.includes(p));
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Plan-based permission filtering error:', error);
+            // Default to granting standard permissions if filtering fails
+        }
+    }
+
+    return finalPermissions;
 };
 
 // @desc    Get permissions for current user

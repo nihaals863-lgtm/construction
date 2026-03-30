@@ -1,6 +1,9 @@
 const Project = require('../models/Project');
 const Task = require('../models/Task');
 const User = require('../models/User');
+const Company = require('../models/Company');
+const Plan = require('../models/Plan');
+
 
 // @desc    Get projects for the company
 // @route   GET /api/projects
@@ -115,6 +118,26 @@ const getProjectById = async (req, res, next) => {
 const createProject = async (req, res, next) => {
     try {
         const { name, clientId, startDate, endDate, budget, location, geofenceRadius, image, pmId } = req.body;
+
+        // --- ENFORCE PLAN LIMITS ---
+        const companyId = req.user.companyId;
+        const company = await Company.findById(companyId);
+        if (company) {
+            const mongoose = require('mongoose');
+            const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
+                ? { _id: company.subscriptionPlanId }
+                : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+
+            const plan = await Plan.findOne(planQuery);
+            const maxProjects = plan?.maxProjects || 5; // Default limit if plan not found
+
+            const currentProjectCount = await Project.countDocuments({ companyId });
+            if (currentProjectCount >= maxProjects) {
+                res.status(403);
+                throw new Error(`Project limit reached for your plan (${maxProjects} projects). Please upgrade your plan to create more projects.`);
+            }
+        }
+        // ---------------------------
 
         const project = await Project.create({
             companyId: req.user.companyId,
