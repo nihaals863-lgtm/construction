@@ -826,7 +826,9 @@ const getSchedule = async (req, res, next) => {
                 .populate('assignedTo', 'fullName')
                 .sort({ dueDate: 1, createdAt: -1 })
                 .lean(),
-            SubTask.find({ companyId }).lean() // More efficient than querying per task if many
+            SubTask.find({ companyId })
+                .populate('assignedTo', 'fullName role')
+                .lean() // Efficient fetch with populated assignees 
         ]);
 
         const formatted = tasks.map(t => ({
