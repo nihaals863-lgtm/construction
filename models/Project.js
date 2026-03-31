@@ -69,7 +69,13 @@ const projectSchema = new mongoose.Schema({
     currentPhase: {
         type: String,
         default: 'Planning'
-    }
+    },
+    contacts: [{
+        name: { type: String, required: true },
+        email: { type: String },
+        phone: { type: String },
+        role: { type: String }
+    }]
 }, {
     timestamps: true
 });
