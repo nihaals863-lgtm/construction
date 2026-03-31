@@ -29,7 +29,7 @@ const issueSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['open', 'in_progress', 'fixed', 'closed'],
+        enum: ['open', 'in_progress', 'fixed', 'closed', 'in_review', 'resolved'],
         default: 'open'
     },
     assignedTo: {
@@ -44,8 +44,8 @@ const issueSchema = new mongoose.Schema({
     dueDate: Date,
     category: {
         type: String,
-        enum: ['safety', 'quality', 'work', 'material', 'other'],
-        default: 'work'
+        enum: ['safety', 'quality', 'work', 'material', 'other', 'general', 'equipment'],
+        default: 'general'
     },
     photoIds: [{
         type: mongoose.Schema.Types.ObjectId,

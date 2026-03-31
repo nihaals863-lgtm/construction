@@ -52,14 +52,17 @@ const createDailyLog = async (req, res, next) => {
             reportedBy: req.user._id
         };
 
-        // If location is passed as a string (JSON), parse it
-        if (typeof req.body.location === 'string') {
-            try {
-                logData.location = JSON.parse(req.body.location);
-            } catch (e) {
-                console.error('Error parsing location:', e);
+        // Handle fields that might be stringified JSON from multipart/form-data
+        const jsonFields = ['location', 'manpower', 'weather', 'materialsReceived', 'equipmentUsed', 'visitors'];
+        jsonFields.forEach(field => {
+            if (typeof req.body[field] === 'string') {
+                try {
+                    logData[field] = JSON.parse(req.body[field]);
+                } catch (e) {
+                    console.error(`Error parsing ${field}:`, e);
+                }
             }
-        }
+        });
 
         const log = await DailyLog.create(logData);
         res.status(201).json(log);
