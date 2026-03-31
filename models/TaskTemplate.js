@@ -13,6 +13,7 @@ const taskTemplateSchema = new mongoose.Schema({
         required: true
     },
     templateName: { type: String, required: true },
+    role: { type: String, required: true },
     title: { type: String, required: true },
     description: { type: String, default: '' },
     priority: { type: String, enum: ['Low', 'Medium', 'High'], default: 'Medium' },

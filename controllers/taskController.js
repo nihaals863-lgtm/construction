@@ -261,6 +261,9 @@ const createTask = async (req, res, next) => {
                 taskId: task._id,
                 companyId: req.user.companyId,
                 title: step.title,
+                assignedTo: step.assignedTo || (assignedToArr.length > 0 ? assignedToArr[0] : undefined),
+                startDate: step.startDate || startDate || undefined,
+                dueDate: step.dueDate || dueDate || undefined,
                 remarks: step.remarks || '',
                 priority: step.priority || 'Medium',
                 createdBy: req.user._id
