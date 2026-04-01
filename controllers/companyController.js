@@ -266,6 +266,10 @@ const updateCompany = async (req, res, next) => {
         // Update Company Details
         const updates = { ...req.body };
         
+        // Remove immutable fields that cause MongoDB errors
+        delete updates._id;
+        delete updates.id;
+        
         // Map frontend "plan" to backend "subscriptionPlanId" 
         if (updates.plan) {
             updates.subscriptionPlanId = updates.plan;
