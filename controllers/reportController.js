@@ -102,6 +102,15 @@ const getCompanyReport = async (req, res, next) => {
             return acc;
         }, 0);
 
+        // Tasks counts
+        const totalTasksCount = await Task.countDocuments({ companyId });
+        const completedTasksCount = await Task.countDocuments({ companyId, status: 'completed' });
+        const overdueTasksCount = await Task.countDocuments({ 
+            companyId, 
+            status: { $ne: 'completed' }, 
+            dueDate: { $lt: new Date() } 
+        });
+
         // Weekly Productivity (Last 7 days)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
