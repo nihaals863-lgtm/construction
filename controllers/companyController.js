@@ -141,12 +141,17 @@ const getCompanies = async (req, res, next) => {
     try {
         // Fetch users who are company owners and populate company details
         const users = await User.find({ role: 'COMPANY_OWNER' })
-            .populate('companyId')
+            .populate({
+                path: 'companyId',
+                populate: { path: 'subscriptionPlanId' }
+            })
             .select('-password');
 
         // Map to a structure that the frontend expects, merging user and company info
         const companies = users.map(user => {
             const company = user.companyId || {};
+            const plan = company.subscriptionPlanId || {};
+            
             return {
                 ...company._doc, // Company details
                 ...user._doc,    // User details (overwrites _id with user._id)
@@ -156,6 +161,8 @@ const getCompanies = async (req, res, next) => {
                 ownerName: user.fullName,
                 email: user.email, // Ensure user email is used
                 phone: user.phone || company.phone,
+                planName: plan.name || 'No Plan', // Include plan name
+                planDetails: plan, // Include full plan details if needed
                 users: company.users // Keep existing virtuals/fields if any
             };
         });
