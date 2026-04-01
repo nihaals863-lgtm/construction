@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const Company = require('../models/Company');
+const Plan = require('../models/Plan');
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { fetchUserPermissions } = require('./roleController');
 
@@ -24,11 +26,22 @@ const registerCompany = async (req, res, next) => {
             throw new Error('Company with this name already exists');
         }
 
+        // --- RESOLVE PLAN IF STRING ---
+        let finalPlanId = null;
+        const searchPlan = plan || 'starter';
+        if (searchPlan && typeof searchPlan === 'string' && !mongoose.Types.ObjectId.isValid(searchPlan)) {
+            const planDoc = await Plan.findOne({ name: new RegExp('^' + searchPlan + '$', 'i') });
+            finalPlanId = planDoc ? planDoc._id : null;
+        } else if (mongoose.Types.ObjectId.isValid(searchPlan)) {
+            finalPlanId = searchPlan;
+        }
+        // ------------------------------
+
         // Create Company
         const company = await Company.create({
             name: companyName,
             email: email, // Default to owner email
-            subscriptionPlanId: plan || 'starter',
+            subscriptionPlanId: finalPlanId,
             subscriptionStatus: 'active'
         });
 

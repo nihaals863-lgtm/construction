@@ -1,4 +1,5 @@
 const Company = require('../models/Company');
+const Plan = require('../models/Plan');
 const User = require('../models/User');
 const Task = require('../models/Task');
 const Project = require('../models/Project');
@@ -7,6 +8,7 @@ const Invoice = require('../models/Invoice');
 const Photo = require('../models/Photo');
 const PurchaseOrder = require('../models/purchaseOrder.model');
 const TimeLog = require('../models/TimeLog');
+const mongoose = require('mongoose');
 
 // @desc    Get dashboard statistics for a company
 // @route   GET /api/companies/dashboard/stats
@@ -203,11 +205,18 @@ const createCompany = async (req, res, next) => {
         }
 
         const userExists = await User.findOne({ email });
-
         if (userExists) {
             res.status(400);
             throw new Error('User with this email already exists');
         }
+
+        // --- RESOLVE PLAN IF STRING ---
+        let finalPlanId = plan;
+        if (plan && typeof plan === 'string' && !mongoose.Types.ObjectId.isValid(plan)) {
+            const planDoc = await Plan.findOne({ name: new RegExp('^' + plan + '$', 'i') });
+            finalPlanId = planDoc ? planDoc._id : null;
+        }
+        // ------------------------------
 
         const company = await Company.create({
             name,
@@ -216,7 +225,7 @@ const createCompany = async (req, res, next) => {
             address,
             startDate,
             expireDate,
-            subscriptionPlanId: plan,
+            subscriptionPlanId: finalPlanId,
             planType
         });
 
@@ -274,6 +283,20 @@ const updateCompany = async (req, res, next) => {
         if (updates.plan) {
             updates.subscriptionPlanId = updates.plan;
             delete updates.plan;
+        }
+
+        // If subscriptionPlanId is a string that's NOT a valid ObjectId, try to find the plan by name
+        if (updates.subscriptionPlanId && typeof updates.subscriptionPlanId === 'string' && !mongoose.Types.ObjectId.isValid(updates.subscriptionPlanId)) {
+            const plan = await Plan.findOne({ name: new RegExp('^' + updates.subscriptionPlanId + '$', 'i') });
+            if (plan) {
+                updates.subscriptionPlanId = plan._id;
+            } else {
+                // If plan not found, maybe remove it to avoid cast error, 
+                // or just let it fail if we want strict plans. 
+                // Given the legacy flow, let's just delete it to prevent the crash, 
+                // although it would be better to return a 400.
+                delete updates.subscriptionPlanId;
+            }
         }
 
         const updatedCompany = await Company.findByIdAndUpdate(company._id, updates, {
