@@ -20,8 +20,8 @@ const companySchema = new mongoose.Schema({
         type: String
     },
     subscriptionPlanId: {
-        type: String,
-        default: 'basic'
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Plan'
     },
     subscriptionStatus: {
         type: String,

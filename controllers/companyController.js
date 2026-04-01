@@ -264,11 +264,13 @@ const updateCompany = async (req, res, next) => {
         }
 
         // Update Company Details
-        // Sanitize body to remove immutable fields
         const updates = { ...req.body };
-        delete updates._id;
-        delete updates.createdAt;
-        delete updates.updatedAt;
+        
+        // Map frontend "plan" to backend "subscriptionPlanId" 
+        if (updates.plan) {
+            updates.subscriptionPlanId = updates.plan;
+            delete updates.plan;
+        }
 
         const updatedCompany = await Company.findByIdAndUpdate(company._id, updates, {
             new: true,

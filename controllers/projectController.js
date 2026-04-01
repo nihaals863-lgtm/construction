@@ -124,17 +124,20 @@ const createProject = async (req, res, next) => {
         const company = await Company.findById(companyId);
         if (company) {
             const mongoose = require('mongoose');
+            // Try matching by ID first, then by name (case-insensitive)
             const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
                 ? { _id: company.subscriptionPlanId }
                 : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
 
             const plan = await Plan.findOne(planQuery);
-            const maxProjects = plan?.maxProjects || 20; // Increased default limit if plan not found to avoid unblocking issues
+            
+            // Define strict limits: Plan value > Plan model default > hard fallback
+            const maxProjects = plan?.maxProjects || 5; 
 
             const currentProjectCount = await Project.countDocuments({ companyId });
             if (currentProjectCount >= maxProjects) {
                 res.status(403);
-                throw new Error(`Project limit reached (${currentProjectCount}/${maxProjects}). Use a higher subscription tier to start new job sites.`);
+                throw new Error(`Project limit reached for your Current Plan (${currentProjectCount}/${maxProjects} projects). Please upgrade your subscription to start more projects or manage existing ones.`);
             }
         }
         // ---------------------------

@@ -287,25 +287,6 @@ const createUser = async (req, res, next) => {
             throw new Error('Current user does not belong to a company');
         }
 
-        // --- ENFORCE PLAN LIMITS ---
-        const Plan = require('../models/Plan');
-        const company = await Company.findById(req.user.companyId);
-        if (company) {
-            // Safe lookup for plan: check if it's a valid ObjectId or a name string
-            const mongoose = require('mongoose');
-            const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
-                ? { _id: company.subscriptionPlanId }
-                : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
-
-            const plan = await Plan.findOne(planQuery);
-            const maxUsers = plan?.maxUsers || 50; // Increased default limit if plan not found to avoid unblocking issues
-
-            const currentUserCount = await User.countDocuments({ companyId: req.user.companyId });
-            if (currentUserCount >= maxUsers) {
-                res.status(403);
-                throw new Error(`User limit reached (${currentUserCount}/${maxUsers}). Use a higher subscription tier to add more team members.`);
-            }
-        }
         // ---------------------------
 
         const userExists = await User.findOne({ email });
