@@ -129,12 +129,12 @@ const createProject = async (req, res, next) => {
                 : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
 
             const plan = await Plan.findOne(planQuery);
-            const maxProjects = plan?.maxProjects || 5; // Default limit if plan not found
+            const maxProjects = plan?.maxProjects || 20; // Increased default limit if plan not found to avoid unblocking issues
 
             const currentProjectCount = await Project.countDocuments({ companyId });
             if (currentProjectCount >= maxProjects) {
                 res.status(403);
-                throw new Error(`Project limit reached for your plan (${maxProjects} projects). Please upgrade your plan to create more projects.`);
+                throw new Error(`Project limit reached (${currentProjectCount}/${maxProjects}). Use a higher subscription tier to start new job sites.`);
             }
         }
         // ---------------------------

@@ -169,9 +169,19 @@ const getCompanyReport = async (req, res, next) => {
         const totalEquipment = await Equipment.countDocuments({ companyId });
         const operationalEquipment = await Equipment.countDocuments({ companyId, status: 'operational' });
 
+        // Detailed Overdue Tasks
+        const outstandingTasksList = await Task.find({
+            companyId,
+            status: { $ne: 'completed' },
+            dueDate: { $lt: new Date() }
+        })
+        .sort({ dueDate: 1 })
+        .limit(10)
+        .populate('projectId', 'name');
+
         res.json({
             financials: {
-                totalRevenue: totalPaid, // Assuming paid invoices = revenue
+                totalRevenue: totalPaid,
                 totalInvoiced,
                 outstanding: totalOutstanding,
                 projectBudget: totalBudget
@@ -182,6 +192,17 @@ const getCompanyReport = async (req, res, next) => {
                 activeSites,
                 onHold,
                 handedOver
+            },
+            tasks: {
+                total: totalTasksCount,
+                completed: completedTasksCount,
+                overdue: overdueTasksCount,
+                completionRate: totalTasksCount > 0 ? ((completedTasksCount / totalTasksCount) * 100).toFixed(1) : 0,
+                outstandingTasks: outstandingTasksList.map(t => ({
+                    title: t.title,
+                    dueDate: t.dueDate,
+                    projectName: t.projectId?.name || 'Unknown Project'
+                }))
             },
             labor: {
                 totalHours: Math.round(totalLaborHours),

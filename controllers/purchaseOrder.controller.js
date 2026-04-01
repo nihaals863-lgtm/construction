@@ -51,6 +51,9 @@ exports.createPO = async (req, res) => {
         await po.save();
         res.status(201).json(po);
     } catch (error) {
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: error.message });
+        }
         res.status(500).json({ message: error.message });
     }
 };
@@ -131,6 +134,9 @@ exports.updatePO = async (req, res) => {
         await po.save();
         res.json(po);
     } catch (error) {
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ message: error.message });
+        }
         res.status(500).json({ message: error.message });
     }
 };

@@ -298,12 +298,12 @@ const createUser = async (req, res, next) => {
                 : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
 
             const plan = await Plan.findOne(planQuery);
-            const maxUsers = plan?.maxUsers || 10; // Default limit if plan not found
+            const maxUsers = plan?.maxUsers || 50; // Increased default limit if plan not found to avoid unblocking issues
 
             const currentUserCount = await User.countDocuments({ companyId: req.user.companyId });
             if (currentUserCount >= maxUsers) {
                 res.status(403);
-                throw new Error(`User limit reached for your plan (${maxUsers} users). Please upgrade your plan to add more team members.`);
+                throw new Error(`User limit reached (${currentUserCount}/${maxUsers}). Use a higher subscription tier to add more team members.`);
             }
         }
         // ---------------------------
