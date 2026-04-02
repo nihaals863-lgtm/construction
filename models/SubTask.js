@@ -3,9 +3,15 @@ const mongoose = require('mongoose');
 const subTaskSchema = new mongoose.Schema({
     taskId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Task',
         required: true,
+        refPath: 'onModel',
         index: true
+    },
+    onModel: {
+        type: String,
+        required: true,
+        enum: ['Task', 'JobTask'],
+        default: 'Task'
     },
     // If set, this is a child of another subtask (nested)
     parentSubTaskId: {

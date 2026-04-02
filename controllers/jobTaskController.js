@@ -2,6 +2,7 @@ const JobTask = require('../models/JobTask');
 const Job = require('../models/Job');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
+const SubTask = require('../models/SubTask');
 
 // Helper: Validate role-based assignment hierarchy
 const validateAssignmentHierarchy = async (assignerRole, assigneeId) => {
@@ -106,19 +107,38 @@ const createJobTask = async (req, res) => {
 // @access  Private
 const getJobTasks = async (req, res) => {
     try {
-        const filter = { jobId: req.params.jobId, companyId: req.user.companyId };
+        const companyId = req.user.companyId;
+        const filter = { jobId: req.params.jobId, companyId };
 
-        // For workers, only show their own tasks (as per requirement "Workers should only see their assigned tasks")
-        // NOTE: The request said "Workers can only see their assigned tasks", but usually on a job page they might see titles.
-        // I will stick to the strict rule for now.
+        // For workers, only show their own tasks OR tasks where they have assigned sub-tasks
         if (req.user.role === 'WORKER') {
-            filter.assignedTo = req.user._id;
+            const subTaskJobTaskIds = await SubTask.find({ assignedTo: req.user._id, companyId, onModel: 'JobTask' }).distinct('taskId');
+            filter.$or = [
+                { assignedTo: req.user._id },
+                { _id: { $in: subTaskJobTaskIds } }
+            ];
         }
 
         const tasks = await JobTask.find(filter)
             .populate('assignedTo', 'fullName role')
-            .sort({ createdAt: -1 });
-        res.json(tasks);
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Fetch all sub-tasks for these job tasks
+        const taskIds = tasks.map(t => t._id);
+        const subTasks = await SubTask.find({ taskId: { $in: taskIds }, companyId })
+            .populate('assignedTo', 'fullName role')
+            .populate('createdBy', 'fullName')
+            .lean();
+
+        // Mapped sub-tasks for UI consistency
+        const mappedSubTasks = subTasks.map(st => ({
+            ...st,
+            isSubTask: true,
+            isJobTask: true,
+        }));
+
+        res.json([...tasks, ...mappedSubTasks]);
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -134,8 +154,8 @@ const updateJobTask = async (req, res) => {
 
         // Workers can only update status
         if (req.user.role === 'WORKER') {
-            // Check if task is assigned to them
-            if (task.assignedTo.toString() !== req.user._id.toString()) {
+            // Check if task is assigned to them (or they have subtask - but updateJobTask usually for main task)
+            if (task.assignedTo?.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ message: 'Not authorized to update this task' });
             }
             const { status, cancellationReason } = req.body;
@@ -154,7 +174,7 @@ const updateJobTask = async (req, res) => {
         if (req.body.status) {
             await updateJobProgress(task.jobId);
 
-            // Notify creator if status updated by someone else (e.g. worker completes task)
+            // Notify creator if status updated by someone else
             if (task.createdBy.toString() !== req.user._id.toString()) {
                 await Notification.create({
                     companyId: req.user.companyId,
@@ -162,7 +182,7 @@ const updateJobTask = async (req, res) => {
                     title: 'Task Status Updated',
                     message: `Task "${task.title}" status changed to ${task.status} by ${req.user.fullName}.`,
                     type: 'task',
-                    link: `/company-admin/projects/all/jobs/${task.jobId}` // Generic link since we don't have projectId easily here without populating
+                    link: `/company-admin/projects/all/jobs/${task.jobId}`
                 });
 
                 const io = req.app.get('io');
@@ -190,9 +210,8 @@ const deleteJobTask = async (req, res) => {
         const task = await JobTask.findById(req.params.id);
         if (!task) return res.status(404).json({ message: 'Task not found' });
 
-        // Workers can only delete tasks assigned to them that are 'cancelled'
         if (req.user.role === 'WORKER') {
-            if (task.assignedTo.toString() !== req.user._id.toString()) {
+            if (task.assignedTo?.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ message: 'Not authorized to delete this task' });
             }
             if (task.status !== 'cancelled') {
@@ -216,14 +235,21 @@ const deleteJobTask = async (req, res) => {
 // @access  Private (Worker)
 const getWorkerTasks = async (req, res) => {
     try {
+        const userId = req.user._id;
+        const companyId = req.user.companyId;
+
+        const subTaskJobTaskIds = await SubTask.find({ assignedTo: userId, companyId, onModel: 'JobTask' }).distinct('taskId');
+
         const query = {
-            companyId: req.user.companyId
+            companyId,
+            $or: [
+                { assignedTo: userId },
+                { _id: { $in: subTaskJobTaskIds } }
+            ]
         };
 
         if (req.user.role === 'FOREMAN') {
-            query.$or = [{ assignedTo: req.user._id }, { assignedForeman: req.user._id }];
-        } else {
-            query.assignedTo = req.user._id;
+            query.$or.push({ assignedForeman: userId });
         }
 
         const tasks = await JobTask.find(query)
