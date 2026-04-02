@@ -167,9 +167,25 @@ const getProjectTasks = async (req, res, next) => {
             .populate('assignedTo', 'fullName email role')
             .populate('assignedBy', 'fullName role')
             .populate('createdBy', 'fullName')
-            .sort({ dueDate: 1 });
+            .sort({ dueDate: 1 })
+            .lean();
 
-        res.json(tasks);
+        // Also fetch all sub-tasks for these tasks to show them in the flat list
+        const taskIds = tasks.map(t => t._id);
+        const subTasks = await SubTask.find({ taskId: { $in: taskIds }, companyId })
+            .populate('assignedTo', 'fullName email role')
+            .populate('createdBy', 'fullName')
+            .lean();
+
+        // Mapped sub-tasks to match Task structure for UI consistency
+        const mappedSubTasks = subTasks.map(st => ({
+            ...st,
+            isSubTask: true,
+            assignedTo: st.assignedTo ? [st.assignedTo] : [],
+            // Use parent task's priority if not set? (No, SubTask has its own priority)
+        }));
+
+        res.json([...tasks, ...mappedSubTasks]);
     } catch (error) {
         next(error);
     }
