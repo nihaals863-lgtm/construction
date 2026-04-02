@@ -3,6 +3,7 @@ const Project = require('../models/Project');
 const JobWorker = require('../models/JobWorker');
 const JobTimeLog = require('../models/JobTimeLog');
 const JobActivityLog = require('../models/JobActivityLog');
+const JobNote = require('../models/JobNote');
 const { dispatchNotification } = require('../utils/notificationHelper');
 const mongoose = require('mongoose');
 
@@ -648,6 +649,58 @@ const generateJobHistoryPDF = async (req, res) => {
     }
 };
 
+// GET /jobs/:id/notes
+const getJobNotes = async (req, res) => {
+    try {
+        const notes = await JobNote.find({ 
+            jobId: req.params.id, 
+            companyId: req.user.companyId 
+        })
+        .populate('createdBy', 'fullName avatar')
+        .sort({ createdAt: -1 });
+        
+        res.json(notes);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// POST /jobs/:id/notes
+const createJobNote = async (req, res) => {
+    try {
+        const { content } = req.body;
+        if (!content) return res.status(400).json({ message: 'Content is required' });
+
+        const note = await JobNote.create({
+            jobId: req.params.id,
+            companyId: req.user.companyId,
+            content,
+            createdBy: req.user._id
+        });
+
+        const populated = await JobNote.findById(note._id).populate('createdBy', 'fullName avatar');
+        res.status(201).json(populated);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};
+
+// DELETE /jobs/:id/notes/:noteId
+const deleteJobNote = async (req, res) => {
+    try {
+        const note = await JobNote.findOneAndDelete({
+            _id: req.params.noteId,
+            companyId: req.user.companyId
+        });
+        
+        if (!note) return res.status(404).json({ message: 'Note not found' });
+        
+        res.json({ message: 'Note deleted' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports = {
     getJobs,
     getJobById,
@@ -655,5 +708,8 @@ module.exports = {
     updateJob,
     deleteJob,
     getJobFullHistory,
-    generateJobHistoryPDF
+    generateJobHistoryPDF,
+    getJobNotes,
+    createJobNote,
+    deleteJobNote
 };

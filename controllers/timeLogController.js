@@ -25,16 +25,20 @@ const clockIn = async (req, res, next) => {
         const { projectId, jobId, taskId, latitude, longitude, accuracy, deviceInfo, userId } = req.body;
         const targetUserId = userId || req.user._id;
 
-        // Validation: Mandatory GPS
-        if (!latitude || !longitude) {
-            res.status(400);
-            throw new Error('Location access is required to clock in. Please enable GPS.');
+        // Validation: Mandatory GPS (Except for Admin Force Clock-in)
+        if ((!latitude && latitude !== 0) || (!longitude && longitude !== 0)) {
+            if (!userId || userId === req.user._id.toString()) {
+                res.status(400);
+                throw new Error('Location access is required to clock in. Please enable GPS.');
+            }
         }
 
-        // Validation: Accuracy must be reasonable (e.g., < 50m)
-        if (accuracy && accuracy > 50) {
-            res.status(400);
-            throw new Error('GPS accuracy too low ( > 50m). Please try again in an area with better signal.');
+        // Validation: Accuracy must be reasonable (e.g., < 200m)
+        if (accuracy && accuracy > 200) {
+            if (!userId || userId === req.user._id.toString()) {
+                res.status(400);
+                throw new Error('GPS accuracy too low ( > 200m). Please try again in an area with better signal.');
+            }
         }
 
         // Check if already clocked in
@@ -123,10 +127,12 @@ const clockOut = async (req, res, next) => {
         const { latitude, longitude, accuracy, userId } = req.body;
         const targetUserId = userId || req.user._id;
 
-        // Validation: Mandatory GPS
-        if (!latitude || !longitude) {
-            res.status(400);
-            throw new Error('Location access is required to clock out. Please enable GPS.');
+        // Validation: Mandatory GPS (Except for Admin/Foreman Force Clock-out)
+        if ((!latitude && latitude !== 0) || (!longitude && longitude !== 0)) {
+            if (!userId || userId === req.user._id.toString()) {
+                res.status(400);
+                throw new Error('Location access is required to clock out. Please enable GPS.');
+            }
         }
 
         const log = await TimeLog.findOne({
