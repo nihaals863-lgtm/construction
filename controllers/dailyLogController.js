@@ -106,6 +106,48 @@ const deleteDailyLog = async (req, res, next) => {
     }
 };
 
+const updateDailyLog = async (req, res, next) => {
+    try {
+        const log = await DailyLog.findOne({ _id: req.params.id, companyId: req.user.companyId });
+        if (!log) {
+            res.status(404);
+            throw new Error('Daily log not found');
+        }
+
+        let photos = log.photos || [];
+        if (req.files && req.files.length > 0) {
+            const newPhotos = req.files.map(file => file.path || file.secure_url);
+            photos = [...photos, ...newPhotos];
+        }
+
+        const updateData = {
+            ...req.body,
+            photos
+        };
+
+        // Handle fields that might be stringified JSON from multipart/form-data
+        const jsonFields = ['location', 'manpower', 'weather', 'materialsReceived', 'equipmentUsed', 'visitors'];
+        jsonFields.forEach(field => {
+            if (typeof req.body[field] === 'string') {
+                try {
+                    updateData[field] = JSON.parse(req.body[field]);
+                } catch (e) {
+                    console.error(`Error parsing ${field}:`, e);
+                }
+            }
+        });
+
+        const updatedLog = await DailyLog.findByIdAndUpdate(req.params.id, updateData, {
+            new: true,
+            runValidators: true
+        }).populate('projectId', 'name').populate('reportedBy', 'fullName role');
+
+        res.json(updatedLog);
+    } catch (error) {
+        next(error);
+    }
+};
+
 // @desc    Get daily log reports (Summary + Charts)
 // @route   GET /api/dailylogs/reports
 // @access  Private (Admin, PM)
@@ -220,6 +262,7 @@ module.exports = {
     getDailyLogs,
     createDailyLog,
     verifyDailyLog,
+    updateDailyLog,
     deleteDailyLog,
     getDailyLogReports
 };
