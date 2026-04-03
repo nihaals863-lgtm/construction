@@ -22,11 +22,24 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 // @access  Private
 const clockIn = async (req, res, next) => {
     try {
-        const { projectId, jobId, taskId, latitude, longitude, accuracy, deviceInfo, userId } = req.body;
+        const { projectId, jobId, taskId, latitude, longitude, accuracy, deviceInfo, userId, isManual, reason, clockIn: manualTime } = req.body;
         const targetUserId = userId || req.user._id;
 
-        // Validation: Mandatory GPS (Except for Admin Force Clock-in)
-        if ((!latitude && latitude !== 0) || (!longitude && longitude !== 0)) {
+        // Role-based check for manual entry
+        if (isManual) {
+            const allowedRoles = ['COMPANY_OWNER', 'PM', 'SUPER_ADMIN'];
+            if (!allowedRoles.includes(req.user.role)) {
+                res.status(403);
+                throw new Error('Only Admin and Project Managers can perform manual time entry.');
+            }
+            if (!manualTime) {
+                res.status(400);
+                throw new Error('Clock-in time is required for manual entry.');
+            }
+        }
+
+        // Validation: Mandatory GPS (Except for Admin Force Clock-in or Manual Entry)
+        if (!isManual && ((!latitude && latitude !== 0) || (!longitude && longitude !== 0))) {
             if (!userId || userId === req.user._id.toString()) {
                 res.status(400);
                 throw new Error('Location access is required to clock in. Please enable GPS.');
@@ -34,7 +47,7 @@ const clockIn = async (req, res, next) => {
         }
 
         // Validation: Accuracy must be reasonable (e.g., < 200m)
-        if (accuracy && accuracy > 200) {
+        if (!isManual && accuracy && accuracy > 200) {
             if (!userId || userId === req.user._id.toString()) {
                 res.status(400);
                 throw new Error('GPS accuracy too low ( > 200m). Please try again in an area with better signal.');
@@ -55,7 +68,7 @@ const clockIn = async (req, res, next) => {
         let geofenceStatus = 'unknown';
         let isOutsideGeofence = false;
 
-        if (projectId && latitude && longitude) {
+        if (!isManual && projectId && latitude && longitude) {
             const project = await Project.findById(projectId);
             if (project) {
                 // Use site coordinates if available, otherwise fallback to location.latitude
@@ -83,14 +96,19 @@ const clockIn = async (req, res, next) => {
             projectId,
             jobId,
             taskId,
-            clockIn: new Date(),
+            clockIn: isManual ? new Date(manualTime) : new Date(),
             gpsIn: { latitude, longitude }, // compatibility
             clockInLatitude: latitude,
             clockInLongitude: longitude,
             clockInAccuracy: accuracy,
             geofenceStatus,
             isOutsideGeofence,
-            deviceInfo
+            isManual: isManual || false,
+            reason,
+            createdBy: req.user._id,
+            createdByRole: req.user.role,
+            deviceInfo: isManual ? `Manual Entry by ${req.user.role}` : deviceInfo,
+            clockOut: (isManual && req.body.clockOut) ? new Date(req.body.clockOut) : null
         });
 
         // If taskId is provided, update task status to 'in_progress'
@@ -105,10 +123,14 @@ const clockIn = async (req, res, next) => {
         // Emit socket event
         const io = req.app.get('io');
         if (io) {
+            const populatedLog = await TimeLog.findById(log._id)
+                .populate('userId', 'fullName role avatar')
+                .populate('projectId', 'name');
+
             io.emit('attendance_update', {
-                type: 'clock-in',
+                type: log.clockOut ? 'manual-entry' : 'clock-in',
                 userId: targetUserId,
-                log: await TimeLog.findById(log._id).populate('userId', 'fullName role avatar').populate('projectId', 'name')
+                log: populatedLog
             });
             // Emit task update event to refresh UI without reload
             if (taskId) {
@@ -124,11 +146,24 @@ const clockIn = async (req, res, next) => {
 
 const clockOut = async (req, res, next) => {
     try {
-        const { latitude, longitude, accuracy, userId } = req.body;
+        const { latitude, longitude, accuracy, userId, isManual, reason, clockOut: manualTime } = req.body;
         const targetUserId = userId || req.user._id;
 
-        // Validation: Mandatory GPS (Except for Admin/Foreman Force Clock-out)
-        if ((!latitude && latitude !== 0) || (!longitude && longitude !== 0)) {
+        // Role-based check for manual entry
+        if (isManual) {
+            const allowedRoles = ['COMPANY_OWNER', 'PM', 'SUPER_ADMIN'];
+            if (!allowedRoles.includes(req.user.role)) {
+                res.status(403);
+                throw new Error('Only Admin and Project Managers can perform manual time entry.');
+            }
+            if (!manualTime) {
+                res.status(400);
+                throw new Error('Clock-out time is required for manual entry.');
+            }
+        }
+
+        // Validation: Mandatory GPS (Except for Admin/Foreman Force Clock-out or Manual Entry)
+        if (!isManual && ((!latitude && latitude !== 0) || (!longitude && longitude !== 0))) {
             if (!userId || userId === req.user._id.toString()) {
                 res.status(400);
                 throw new Error('Location access is required to clock out. Please enable GPS.');
@@ -146,7 +181,7 @@ const clockOut = async (req, res, next) => {
         }
 
         // Potential geofence check for clock-out if required
-        if (log.projectId && latitude && longitude) {
+        if (!isManual && log.projectId && latitude && longitude) {
             const project = await Project.findById(log.projectId);
             if (project) {
                 const siteLat = project.siteLatitude || project.location?.latitude;
@@ -169,11 +204,18 @@ const clockOut = async (req, res, next) => {
             }
         }
 
-        log.clockOut = new Date();
+        log.clockOut = isManual ? new Date(manualTime) : new Date();
         log.gpsOut = { latitude, longitude }; // compatibility
         log.clockOutLatitude = latitude;
         log.clockOutLongitude = longitude;
         log.clockOutAccuracy = accuracy;
+        if (isManual) {
+            log.isManual = true;
+            log.reason = reason || log.reason;
+            // Record who performed the manual action if it was changed during clock-out
+            log.createdBy = req.user._id;
+            log.createdByRole = req.user.role;
+        }
         await log.save();
 
         // Emit socket event
@@ -207,6 +249,7 @@ const getTimeLogs = async (req, res, next) => {
             .populate('projectId', 'name')
             .populate('jobId', 'name')
             .populate('taskId', 'title')
+            .populate('createdBy', 'fullName role')
             .sort({ clockIn: -1 });
 
         res.json(logs);

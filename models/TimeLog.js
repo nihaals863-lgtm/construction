@@ -58,6 +58,22 @@ const timeLogSchema = new mongoose.Schema({
         enum: ['pending', 'approved', 'rejected'],
         default: 'pending'
     },
+    isManual: {
+        type: Boolean,
+        default: false
+    },
+    reason: {
+        type: String
+    },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    createdByRole: {
+        type: String,
+        enum: ['SUPER_ADMIN', 'COMPANY_OWNER', 'PM', 'FOREMAN', 'SUBCONTRACTOR', 'WORKER', 'SYSTEM'],
+        default: 'WORKER'
+    },
     deviceInfo: {
         type: String
     },
