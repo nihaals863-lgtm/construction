@@ -116,6 +116,7 @@ const loginUser = async (req, res, next) => {
                 email: user.email,
                 role: user.role,
                 companyId: user.companyId,
+                avatar: user.avatar,
                 token: generateToken(user._id, user.role, user.companyId),
                 permissions
             });
@@ -163,6 +164,7 @@ const registerUser = async (req, res, next) => {
                 email: user.email,
                 role: user.role,
                 companyId: user.companyId,
+                avatar: user.avatar,
                 token: generateToken(user._id, user.role, user.companyId),
             });
         } else {
@@ -188,6 +190,7 @@ const getMe = async (req, res, next) => {
                 email: user.email,
                 role: user.role,
                 companyId: user.companyId,
+                avatar: user.avatar,
             });
         } else {
             res.status(404);
