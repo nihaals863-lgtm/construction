@@ -52,6 +52,10 @@ const equipmentSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    costPerHour: {
+        type: Number,
+        default: 0
+    },
     assignmentHistory: [
         {
             jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job', default: null },

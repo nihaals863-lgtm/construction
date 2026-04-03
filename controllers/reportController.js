@@ -961,6 +961,131 @@ const exportAttendanceReport = async (req, res, next) => {
     }
 };
 
+// @desc    Get detailed project report (Job-wise detailed data)
+// @route   GET /api/reports/detailed/:projectId
+// @access  Private (Admin, PM)
+const getDetailedProjectReport = async (req, res, next) => {
+    try {
+        const { projectId } = req.params;
+        const companyId = req.user.companyId;
+
+        const project = await Project.findOne({ _id: projectId, companyId });
+        if (!project) {
+            res.status(404);
+            throw new Error('Project not found');
+        }
+
+        const jobs = await Job.find({ projectId, companyId });
+
+        const detailedJobs = await Promise.all(jobs.map(async (job) => {
+            // Workers & Subcontractors Section (TimeLogs)
+            const timeLogs = await TimeLog.find({ jobId: job._id }).populate('userId', 'fullName role hourlyRate');
+            
+            const workerData = {};
+            const subcontractorData = {};
+
+            timeLogs.forEach(log => {
+                if (!log.clockIn || !log.clockOut || !log.userId) return;
+                const hours = (new Date(log.clockOut) - new Date(log.clockIn)) / (1000 * 60 * 60);
+                const cost = hours * (log.userId.hourlyRate || 0);
+                
+                const target = log.userId.role === 'SUBCONTRACTOR' ? subcontractorData : workerData;
+                const uid = log.userId._id.toString();
+
+                if (!target[uid]) {
+                    target[uid] = { 
+                        name: log.userId.fullName, 
+                        role: log.userId.role, 
+                        totalHours: 0, 
+                        cost: 0,
+                        work: log.userId.role === 'SUBCONTRACTOR' ? 'Contracted Services' : 'Labour'
+                    };
+                }
+                target[uid].totalHours += hours;
+                target[uid].cost += cost;
+            });
+
+            // Equipment Section
+            const equipments = await Equipment.find({ 
+                companyId,
+                $or: [
+                    { assignedJob: job._id },
+                    { 'assignmentHistory.jobId': job._id }
+                ]
+            });
+            
+            const equipData = equipments.map(e => {
+                const relevantHistory = e.assignmentHistory.filter(h => h.jobId?.toString() === job._id.toString());
+                
+                let currentHours = 0;
+                if (e.assignedJob?.toString() === job._id.toString() && e.assignedDate) {
+                    const end = e.returnedDate || new Date();
+                    currentHours = Math.max(0, (new Date(end) - new Date(e.assignedDate)) / (1000 * 60 * 60));
+                }
+                
+                const historyHours = relevantHistory.reduce((acc, h) => {
+                    const start = h.assignedDate;
+                    const end = h.returnedDate || new Date();
+                    return acc + Math.max(0, (new Date(end) - new Date(start)) / (1000 * 60 * 60));
+                }, 0);
+                
+                const totalHours = historyHours + currentHours;
+                return {
+                    name: e.name,
+                    hoursUsed: totalHours.toFixed(1),
+                    cost: (totalHours * (e.costPerHour || 0)).toFixed(2)
+                };
+            }).filter(e => parseFloat(e.hoursUsed) > 0);
+
+            // Material Section (PurchaseOrders)
+            const pos = await PurchaseOrder.find({ jobId: job._id, status: { $nin: ['Draft', 'Cancelled'] } });
+            const materialData = pos.flatMap(po => po.items.map(item => ({
+                name: item.itemName,
+                quantity: item.quantity,
+                cost: item.total
+            })));
+
+            const workerTotal = Object.values(workerData).reduce((acc, w) => acc + w.cost, 0);
+            const subTotal = Object.values(subcontractorData).reduce((acc, s) => acc + s.cost, 0);
+            const equipTotal = equipData.reduce((acc, e) => acc + parseFloat(e.cost), 0);
+            const materialTotal = materialData.reduce((acc, m) => acc + m.cost, 0);
+
+            return {
+                jobName: job.name,
+                budget: job.budget,
+                status: job.status,
+                totalCost: (workerTotal + subTotal + equipTotal + materialTotal).toFixed(2),
+                workers: Object.values(workerData).map(w => ({ ...w, totalHours: w.totalHours.toFixed(1), cost: w.cost.toFixed(2) })),
+                subcontractors: Object.values(subcontractorData).map(s => ({ ...s, totalHours: s.totalHours.toFixed(1), cost: s.cost.toFixed(2) })),
+                equipment: equipData,
+                materials: materialData,
+                breakdown: {
+                    workerCost: workerTotal.toFixed(2),
+                    subcontractorCost: subTotal.toFixed(2),
+                    equipmentCost: equipTotal.toFixed(2),
+                    materialCost: materialTotal.toFixed(2)
+                }
+            };
+        }));
+
+        const totalCostSum = detailedJobs.reduce((acc, j) => acc + parseFloat(j.totalCost), 0);
+
+        res.json({
+            project: {
+                name: project.name,
+                budget: project.budget,
+                totalCost: totalCostSum.toFixed(2),
+                remainingBudget: (project.budget - totalCostSum).toFixed(2),
+                totalJobs: detailedJobs.length
+            },
+            jobs: detailedJobs
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getProjectReport,
     getCompanyReport,
@@ -968,5 +1093,6 @@ module.exports = {
     getWorkerAttendanceReport,
     getForemanAttendanceReport,
     getProjectAttendanceReport,
-    exportAttendanceReport
+    exportAttendanceReport,
+    getDetailedProjectReport
 };
