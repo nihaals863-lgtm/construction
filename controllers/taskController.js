@@ -89,13 +89,13 @@ const getTasks = async (req, res, next) => {
                 .populate('assignedTo', 'fullName email role')
                 .populate('createdBy', 'fullName')
                 .populate('assignedBy', 'fullName')
-                .sort({ position: 1, dueDate: 1, createdAt: -1 })
+                .sort({ createdAt: -1, position: 1, dueDate: 1 })
                 .lean(),
             JobTask.find(jobTaskQuery)
                 .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
                 .populate('assignedTo', 'fullName email role')
                 .populate('createdBy', 'fullName')
-                .sort({ dueDate: 1, createdAt: -1 })
+                .sort({ createdAt: -1, dueDate: 1 })
                 .lean()
         ]);
 
@@ -111,7 +111,8 @@ const getTasks = async (req, res, next) => {
             isJobTask: true
         }));
 
-        res.json([...tasks, ...mappedJobTasks]);
+        const allTasks = [...tasks, ...mappedJobTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        res.json(allTasks);
     } catch (error) {
         next(error);
     }
@@ -156,12 +157,12 @@ const getMyTasks = async (req, res, next) => {
                 .populate('projectId', 'name')
                 .populate('assignedBy', 'fullName role')
                 .populate('createdBy', 'fullName')
-                .sort({ dueDate: 1 })
+                .sort({ createdAt: -1, dueDate: 1 })
                 .lean(),
             JobTask.find(jobTaskQuery)
                 .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
                 .populate('assignedTo', 'fullName email role')
-                .sort({ dueDate: 1 })
+                .sort({ createdAt: -1, dueDate: 1 })
                 .lean()
         ]);
 
@@ -177,7 +178,8 @@ const getMyTasks = async (req, res, next) => {
             isJobTask: true
         }));
 
-        res.json([...tasks, ...mappedJobTasks]);
+        const allTasks = [...tasks, ...mappedJobTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        res.json(allTasks);
     } catch (error) {
         next(error);
     }
@@ -217,7 +219,7 @@ const getProjectTasks = async (req, res, next) => {
             .populate('assignedTo', 'fullName email role')
             .populate('assignedBy', 'fullName role')
             .populate('createdBy', 'fullName')
-            .sort({ dueDate: 1 })
+            .sort({ createdAt: -1, dueDate: 1 })
             .lean();
 
         // Also fetch all sub-tasks for these tasks to show them in the flat list
@@ -235,7 +237,8 @@ const getProjectTasks = async (req, res, next) => {
             // Use parent task's priority if not set? (No, SubTask has its own priority)
         }));
 
-        res.json([...tasks, ...mappedSubTasks]);
+        const allTasks = [...tasks, ...mappedSubTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        res.json(allTasks);
     } catch (error) {
         next(error);
     }

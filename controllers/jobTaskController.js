@@ -138,7 +138,8 @@ const getJobTasks = async (req, res) => {
             isJobTask: true,
         }));
 
-        res.json([...tasks, ...mappedSubTasks]);
+        const allTasks = [...tasks, ...mappedSubTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        res.json(allTasks);
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -258,7 +259,7 @@ const getWorkerTasks = async (req, res) => {
                 select: 'name projectId',
                 populate: { path: 'projectId', select: 'name' }
             })
-            .sort({ dueDate: 1 });
+            .sort({ createdAt: -1 });
         res.json(tasks);
     } catch (err) {
         res.status(500).json({ message: err.message });

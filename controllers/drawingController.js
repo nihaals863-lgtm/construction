@@ -24,7 +24,9 @@ const getDrawings = async (req, res, next) => {
             query.projectId = req.query.projectId;
         }
 
-        const drawings = await Drawing.find(query).populate('projectId', 'name');
+        const drawings = await Drawing.find(query)
+            .populate('projectId', 'name')
+            .sort({ createdAt: -1 });
         res.json(drawings);
     } catch (error) {
         next(error);
@@ -40,7 +42,7 @@ const createDrawing = async (req, res, next) => {
         let fileUrl = req.body.fileUrl;
 
         if (req.file) {
-            fileUrl = `/uploads/drawings/${req.file.filename}`;
+            fileUrl = req.file.path.replace(/\\/g, '/');
         }
 
         if (!fileUrl) {
@@ -77,7 +79,7 @@ const addDrawingVersion = async (req, res, next) => {
         let fileUrl = req.body.fileUrl;
 
         if (req.file) {
-            fileUrl = `/uploads/drawings/${req.file.filename}`;
+            fileUrl = req.file.path.replace(/\\/g, '/');
         }
 
         if (!fileUrl) {

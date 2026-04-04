@@ -14,7 +14,8 @@ const getIssues = async (req, res, next) => {
             .populate('projectId', 'name')
             .populate('assignedTo', 'fullName')
             .populate('reportedBy', 'fullName')
-            .populate('photoIds');
+            .populate('photoIds')
+            .sort({ createdAt: -1 });
 
         res.json(issues);
     } catch (error) {

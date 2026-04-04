@@ -76,7 +76,8 @@ const getProjects = async (req, res, next) => {
         const projects = await Project.find(query)
             .populate('clientId', 'fullName email')
             .populate('createdBy', 'fullName')
-            .populate('pmId', 'fullName email');
+            .populate('pmId', 'fullName email')
+            .sort({ createdAt: -1 });
         console.log('GET /api/projects - success', projects.length);
         res.json(projects);
     } catch (error) {

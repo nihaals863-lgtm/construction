@@ -10,7 +10,20 @@ if (!fs.existsSync(uploadDir)) {
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, uploadDir);
+        // Determine subfolder based on route
+        let folder = 'general';
+        if (req.baseUrl.includes('drawings')) folder = 'drawings';
+        else if (req.baseUrl.includes('rfis')) folder = 'drawings'; // RFIs often attach drawings
+        else if (req.baseUrl.includes('vendors')) folder = 'drawings';
+        
+        const uploadPath = path.join('uploads', folder);
+        
+        // Ensure directory exists
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        
+        cb(null, uploadPath);
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
