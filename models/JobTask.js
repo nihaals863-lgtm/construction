@@ -55,6 +55,10 @@ const jobTaskSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
+    },
+    position: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true

@@ -89,7 +89,7 @@ const getTasks = async (req, res, next) => {
                 .populate('assignedTo', 'fullName email role')
                 .populate('createdBy', 'fullName')
                 .populate('assignedBy', 'fullName')
-                .sort({ createdAt: -1, position: 1, dueDate: 1 })
+                .sort({ position: 1, createdAt: -1, dueDate: 1 })
                 .lean(),
             JobTask.find(jobTaskQuery)
                 .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
@@ -111,7 +111,12 @@ const getTasks = async (req, res, next) => {
             isJobTask: true
         }));
 
-        const allTasks = [...tasks, ...mappedJobTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const allTasks = [...tasks, ...mappedJobTasks].sort((a, b) => {
+            const posA = a.position !== undefined ? a.position : 0;
+            const posB = b.position !== undefined ? b.position : 0;
+            if (posA !== posB) return posA - posB;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
         res.json(allTasks);
     } catch (error) {
         next(error);
@@ -157,7 +162,7 @@ const getMyTasks = async (req, res, next) => {
                 .populate('projectId', 'name')
                 .populate('assignedBy', 'fullName role')
                 .populate('createdBy', 'fullName')
-                .sort({ createdAt: -1, dueDate: 1 })
+                .sort({ position: 1, createdAt: -1, dueDate: 1 })
                 .lean(),
             JobTask.find(jobTaskQuery)
                 .populate({ path: 'jobId', populate: { path: 'projectId', select: 'name' } })
@@ -178,7 +183,12 @@ const getMyTasks = async (req, res, next) => {
             isJobTask: true
         }));
 
-        const allTasks = [...tasks, ...mappedJobTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const allTasks = [...tasks, ...mappedJobTasks].sort((a, b) => {
+            const posA = a.position !== undefined ? a.position : 0;
+            const posB = b.position !== undefined ? b.position : 0;
+            if (posA !== posB) return posA - posB;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
         res.json(allTasks);
     } catch (error) {
         next(error);
@@ -219,7 +229,7 @@ const getProjectTasks = async (req, res, next) => {
             .populate('assignedTo', 'fullName email role')
             .populate('assignedBy', 'fullName role')
             .populate('createdBy', 'fullName')
-            .sort({ createdAt: -1, dueDate: 1 })
+            .sort({ position: 1, createdAt: -1, dueDate: 1 })
             .lean();
 
         // Also fetch all sub-tasks for these tasks to show them in the flat list
@@ -237,7 +247,12 @@ const getProjectTasks = async (req, res, next) => {
             // Use parent task's priority if not set? (No, SubTask has its own priority)
         }));
 
-        const allTasks = [...tasks, ...mappedSubTasks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const allTasks = [...tasks, ...mappedSubTasks].sort((a, b) => {
+            const posA = a.position !== undefined ? a.position : 0;
+            const posB = b.position !== undefined ? b.position : 0;
+            if (posA !== posB) return posA - posB;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
         res.json(allTasks);
     } catch (error) {
         next(error);
@@ -583,26 +598,64 @@ const deleteTask = async (req, res, next) => {
 // @access  Private
 const reorderTasks = async (req, res, next) => {
     try {
-        const { tasks } = req.body; // Array of { id, status, position }
+        const { tasks } = req.body; // Array of { id, status, position, isJobTask }
+        console.log('REORDER_TASKS: Received', tasks ? tasks.length : 0, 'tasks for reordering');
 
         if (!Array.isArray(tasks)) {
             res.status(400);
-            throw new Error('Invalid format: Extpected an array of tasks.');
+            throw new Error('Invalid format: Expected an array of tasks.');
         }
 
-        const bulkOps = tasks.map((task, index) => ({
-            updateOne: {
-                filter: { _id: task.id, companyId: req.user.companyId },
-                update: { status: task.status, position: task.position !== undefined ? task.position : index }
-            }
-        }));
+        const taskBulkOps = tasks
+            .filter(t => !t.isJobTask)
+            .map((task, index) => ({
+                updateOne: {
+                    filter: { _id: task.id, companyId: req.user.companyId },
+                    update: { status: task.status, position: task.position !== undefined ? task.position : index }
+                }
+            }));
 
-        if (bulkOps.length > 0) {
-            await Task.bulkWrite(bulkOps);
+        const jobTaskBulkOps = tasks
+            .filter(t => t.isJobTask)
+            .map((task, index) => ({
+                updateOne: {
+                    filter: { _id: task.id, companyId: req.user.companyId },
+                    update: { 
+                        status: task.status === 'todo' ? 'pending' : task.status, 
+                        position: task.position !== undefined ? task.position : index 
+                    }
+                }
+            }));
+
+        const subTaskBulkOps = tasks
+            .filter(t => t.isSubTask)
+            .map((task, index) => ({
+                updateOne: {
+                    filter: { _id: task.id, companyId: req.user.companyId },
+                    update: { status: task.status, position: task.position !== undefined ? task.position : index }
+                }
+            }));
+
+        if (taskBulkOps.length > 0) {
+            const result = await Task.bulkWrite(taskBulkOps);
+            console.log('REORDER_TASKS: Task model bulkWrite updatedCount:', result.modifiedCount);
+        }
+
+        if (jobTaskBulkOps.length > 0) {
+            const JobTask = require('../models/JobTask');
+            const result = await JobTask.bulkWrite(jobTaskBulkOps);
+            console.log('REORDER_TASKS: JobTask model bulkWrite updatedCount:', result.modifiedCount);
+        }
+
+        if (subTaskBulkOps.length > 0) {
+            const SubTask = require('../models/SubTask');
+            const result = await SubTask.bulkWrite(subTaskBulkOps);
+            console.log('REORDER_TASKS: SubTask model bulkWrite updatedCount:', result.modifiedCount);
         }
 
         res.json({ message: 'Tasks reordered successfully' });
     } catch (error) {
+        console.error('REORDER_TASKS: Error during reorder:', error);
         next(error);
     }
 };
@@ -949,6 +1002,8 @@ const getSchedule = async (req, res, next) => {
             priority: t.priority,
             assignedTo: t.assignedTo,
             projectId: t.projectId,
+            position: t.position,
+            createdAt: t.createdAt,
             dependencies: t.dependencies || [],
             subTasks: subTasks.filter(st => st.taskId?.toString() === t._id.toString())
         }));
@@ -969,7 +1024,14 @@ const getSchedule = async (req, res, next) => {
             isJobTask: true
         }));
 
-        res.json([...formatted, ...jobFormatted]);
+        const allTasks = [...formatted, ...jobFormatted].sort((a, b) => {
+            const posA = a.position !== undefined ? a.position : 0;
+            const posB = b.position !== undefined ? b.position : 0;
+            if (posA !== posB) return posA - posB;
+            return new Date(b.createdAt || b.startDate) - new Date(a.createdAt || a.startDate);
+        });
+
+        res.json(allTasks);
     } catch (error) {
         next(error);
     }
