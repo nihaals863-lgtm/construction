@@ -22,6 +22,38 @@ const validateAssignmentHierarchy = async (assignerRole, assigneeIds) => {
     return null; // All valid
 };
 
+// Helper: Recursively create subtasks from a tree (for templates/pre-fills)
+const createSubTasksRecursive = async (taskId, onModel, steps, companyId, createdBy, parentId = null, assignedTo = null, startDate = null, dueDate = null) => {
+    if (!steps || !Array.isArray(steps) || steps.length === 0) return 0;
+    let count = 0;
+    for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const subTask = await SubTask.create({
+            taskId,
+            onModel,
+            companyId,
+            title: step.title,
+            remarks: step.remarks || '',
+            priority: step.priority || 'Medium',
+            createdBy,
+            position: i,
+            parentSubTaskId: parentId,
+            assignedTo: step.assignedTo || assignedTo || undefined,
+            startDate: step.startDate || startDate || undefined,
+            dueDate: step.dueDate || dueDate || undefined,
+            status: 'todo'
+        });
+        count++;
+        if (step.steps && step.steps.length > 0) {
+            const childCount = await createSubTasksRecursive(taskId, onModel, step.steps, companyId, createdBy, subTask._id, assignedTo, startDate, dueDate);
+            subTask.subTaskCount = childCount;
+            await subTask.save();
+            count += childCount;
+        }
+    }
+    return count;
+};
+
 // @desc    Get tasks (role-based)
 // @route   GET /api/tasks
 // @access  Private
@@ -341,19 +373,8 @@ const createTask = async (req, res, next) => {
 
         // Generate auto steps if passed via subTasksList (Task Template feature)
         if (subTasksList && Array.isArray(subTasksList) && subTasksList.length > 0) {
-            const steps = subTasksList.map(step => ({
-                taskId: task._id,
-                companyId: req.user.companyId,
-                title: step.title,
-                assignedTo: step.assignedTo || (assignedToArr.length > 0 ? assignedToArr[0] : undefined),
-                startDate: step.startDate || startDate || undefined,
-                dueDate: step.dueDate || dueDate || undefined,
-                remarks: step.remarks || '',
-                priority: step.priority || 'Medium',
-                createdBy: req.user._id
-            }));
-            await SubTask.insertMany(steps);
-            task.subTaskCount = steps.length;
+            const totalCreated = await createSubTasksRecursive(task._id, 'Task', subTasksList, req.user.companyId, req.user._id, null, assignedToArr[0], startDate, dueDate);
+            task.subTaskCount = totalCreated;
             await task.save();
         }
 
@@ -1011,7 +1032,7 @@ const getSchedule = async (req, res, next) => {
         const jobFormatted = jobTasksData.map(jt => ({
             id: jt._id,
             title: jt.title,
-            startDate: jt.createdAt, // JobTask might not have startDate, use creation date as fallback
+            startDate: jt.startDate || jt.createdAt, // Use explicit startDate if set, else fallback to createdAt
             endDate: jt.dueDate,
             dueDate: jt.dueDate,
             status: jt.status === 'pending' ? 'todo' : jt.status,

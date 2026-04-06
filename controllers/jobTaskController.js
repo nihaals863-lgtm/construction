@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const JobTask = require('../models/JobTask');
 const Job = require('../models/Job');
 const User = require('../models/User');
@@ -16,6 +17,38 @@ const validateAssignmentHierarchy = async (assignerRole, assigneeId) => {
         return `${assignerRole} can only assign tasks to Workers. (Tried to assign to: ${assignee.fullName} who is ${assignee.role})`;
     }
     return null;
+};
+
+// Helper: Recursively create subtasks from a tree (for templates/pre-fills)
+const createSubTasksRecursive = async (taskId, onModel, steps, companyId, createdBy, parentId = null, assignedTo = null, startDate = null, dueDate = null) => {
+    if (!steps || !Array.isArray(steps) || steps.length === 0) return 0;
+    let count = 0;
+    for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const subTask = await SubTask.create({
+            taskId,
+            onModel,
+            companyId,
+            title: step.title,
+            remarks: step.remarks || '',
+            priority: step.priority || 'Medium',
+            createdBy,
+            position: i,
+            parentSubTaskId: parentId,
+            assignedTo: step.assignedTo || assignedTo || undefined,
+            startDate: step.startDate || startDate || undefined,
+            dueDate: step.dueDate || dueDate || undefined,
+            status: 'todo'
+        });
+        count++;
+        if (step.steps && step.steps.length > 0) {
+            const childCount = await createSubTasksRecursive(taskId, onModel, step.steps, companyId, createdBy, subTask._id, assignedTo, startDate, dueDate);
+            subTask.subTaskCount = childCount;
+            await subTask.save();
+            count += childCount;
+        }
+    }
+    return count;
 };
 
 // Helper to update job progress
@@ -41,7 +74,7 @@ const updateJobProgress = async (jobId) => {
 // @access  Private (Admin/PM/Foreman)
 const createJobTask = async (req, res) => {
     try {
-        const { jobId, title, description, assignedTo, priority, dueDate } = req.body;
+        const { jobId, title, description, assignedTo, assignedRoleType, priority, dueDate, startDate, subTasksList } = req.body;
 
         // --- Role Hierarchy Validation ---
         const hierarchyError = await validateAssignmentHierarchy(req.user.role, assignedTo);
@@ -59,17 +92,30 @@ const createJobTask = async (req, res) => {
             }
         }
 
+        // Normalize for JobTask Schema
+        const normalizedPriority = (priority || 'medium').toLowerCase();
+
         const task = await JobTask.create({
             jobId,
             companyId: req.user.companyId,
             title,
             description,
             assignedTo,
+            assignedRoleType: assignedRoleType || '',
             assignedForeman,
-            priority,
+            priority: normalizedPriority,
+            status: 'pending', // Always start as pending in JobTask
             dueDate,
+            startDate,
             createdBy: req.user._id
         });
+
+        // Generate auto steps if passed via subTasksList (Task Template feature)
+        if (subTasksList && Array.isArray(subTasksList) && subTasksList.length > 0) {
+            const totalCreated = await createSubTasksRecursive(task._id, 'JobTask', subTasksList, req.user.companyId, req.user._id, null, assignedTo, startDate, dueDate);
+            task.subTaskCount = totalCreated;
+            await task.save();
+        }
 
         await updateJobProgress(jobId);
 
@@ -77,28 +123,31 @@ const createJobTask = async (req, res) => {
         const job = await Job.findById(jobId).populate('projectId', 'name');
 
         // Create notification for assigned worker
-        await Notification.create({
-            companyId: req.user.companyId,
-            userId: assignedTo,
-            title: 'New Task Assigned',
-            message: `You have been assigned a new task: "${title}" for job ${job?.name || 'Unknown'}.`,
-            type: 'task',
-            link: `/company-admin/projects/${job?.projectId?._id}/jobs/${jobId}`
-        });
-
-        // Emit socket event if io is available
-        const io = req.app.get('io');
-        if (io) {
-            io.to(assignedTo.toString()).emit('notification', {
+        if (assignedTo) {
+            await Notification.create({
+                companyId: req.user.companyId,
+                userId: assignedTo,
                 title: 'New Task Assigned',
-                message: `You have been assigned a new task: "${title}".`
+                message: `You have been assigned a new task: "${title}" for job ${job?.name || 'Unknown'}.`,
+                type: 'task',
+                link: `/company-admin/projects/${job?.projectId?._id}/jobs/${jobId}`
             });
+
+            // Emit socket event if io is available
+            const io = req.app.get('io');
+            if (io) {
+                io.to(assignedTo.toString()).emit('notification', {
+                    title: 'New Task Assigned',
+                    message: `You have been assigned a new task: "${title}".`
+                });
+            }
         }
 
         const populatedTask = await JobTask.findById(task._id).populate('assignedTo', 'fullName role');
         res.status(201).json(populatedTask);
     } catch (err) {
-        res.status(400).json({ message: err.message });
+        console.error('Error in createJobTask:', err);
+        res.status(500).json({ message: err.message });
     }
 };
 
@@ -164,6 +213,11 @@ const updateJobTask = async (req, res) => {
             if (cancellationReason) task.cancellationReason = cancellationReason;
         } else {
             // Admin/PM/Foreman can update anything
+            
+            // Normalize status and priority if they exist in body
+            if (req.body.status === 'todo') req.body.status = 'pending';
+            if (req.body.priority) req.body.priority = req.body.priority.toLowerCase();
+            
             Object.assign(task, req.body);
             if (req.body.assignedTo && req.user.role === 'FOREMAN' && !task.assignedForeman) {
                 task.assignedForeman = req.user._id;

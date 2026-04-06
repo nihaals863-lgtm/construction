@@ -25,8 +25,12 @@ const jobTaskSchema = new mongoose.Schema({
     assignedTo: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
+        required: false,
         index: true
+    },
+    assignedRoleType: {
+        type: String,
+        default: ''
     },
     assignedForeman: {
         type: mongoose.Schema.Types.ObjectId,
@@ -47,6 +51,9 @@ const jobTaskSchema = new mongoose.Schema({
     cancellationReason: {
         type: String,
         trim: true
+    },
+    startDate: {
+        type: Date
     },
     dueDate: {
         type: Date
