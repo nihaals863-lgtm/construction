@@ -7,6 +7,9 @@ const { protect, authorize } = require('../middlewares/authMiddleware');
 const baseRoles = ['COMPANY_OWNER', 'PM', 'FOREMAN'];
 const adminOnly = ['COMPANY_OWNER'];
 
+// Public Route (No protection) - used for vendor viewing
+router.get('/public/:id', poController.getSinglePO);
+
 router.use(protect);
 
 // 1. CREATE PO
