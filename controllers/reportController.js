@@ -10,6 +10,8 @@ const DailyLog = require('../models/DailyLog');
 const Equipment = require('../models/Equipment');
 const RFI = require('../models/RFI');
 const Job = require('../models/Job');
+const JobTask = require('../models/JobTask');
+const SubTask = require('../models/SubTask');
 
 // @desc    Get project overview report
 // @route   GET /api/reports/project/:projectId
@@ -975,18 +977,51 @@ const getDetailedProjectReport = async (req, res, next) => {
             throw new Error('Project not found');
         }
 
-        const jobs = await Job.find({ projectId, companyId });
+        const [jobs, projectTasks, projectRFIs] = await Promise.all([
+            Job.find({ projectId, companyId }),
+            Task.find({ projectId, companyId }).populate('assignedTo', 'fullName role'),
+            RFI.find({ projectId, companyId })
+        ]);
 
         const detailedJobs = await Promise.all(jobs.map(async (job) => {
+            // Task Section: Fetch JobTasks and their SubTasks
+            const jobTasks = await JobTask.find({ jobId: job._id }).populate('assignedTo', 'fullName role');
+            const subTasks = await SubTask.find({ 
+                taskId: { $in: jobTasks.map(t => t._id) },
+                onModel: 'JobTask'
+            }).populate('assignedTo', 'fullName role');
+
+            // Map subtasks to their tasks
+            const taskTree = jobTasks.map(task => {
+                const associatedSubTasks = subTasks.filter(st => {
+                    const tid = st.taskId?._id || st.taskId;
+                    return tid?.toString() === task._id.toString();
+                });
+                
+                return {
+                    ...task.toObject(),
+                    subtasks: associatedSubTasks
+                };
+            });
+
             // Workers & Subcontractors Section (TimeLogs)
-            const timeLogs = await TimeLog.find({ jobId: job._id }).populate('userId', 'fullName role hourlyRate');
+            const jobTaskIds = jobTasks.map(t => t._id);
+            const subTaskIds = subTasks.map(s => s._id);
+            
+            const timeLogs = await TimeLog.find({ 
+                $or: [
+                    { jobId: job._id },
+                    { taskId: { $in: [...jobTaskIds, ...subTaskIds] } }
+                ]
+            }).populate('userId', 'fullName role hourlyRate');
             
             const workerData = {};
             const subcontractorData = {};
 
             timeLogs.forEach(log => {
-                if (!log.clockIn || !log.clockOut || !log.userId) return;
-                const hours = (new Date(log.clockOut) - new Date(log.clockIn)) / (1000 * 60 * 60);
+                if (!log.clockIn || !log.userId) return;
+                const end = log.clockOut || new Date();
+                const hours = (new Date(end) - new Date(log.clockIn)) / (1000 * 60 * 60);
                 const cost = hours * (log.userId.hourlyRate || 0);
                 
                 const target = log.userId.role === 'SUBCONTRACTOR' ? subcontractorData : workerData;
@@ -1024,14 +1059,15 @@ const getDetailedProjectReport = async (req, res, next) => {
                 }
                 
                 const historyHours = relevantHistory.reduce((acc, h) => {
-                    const start = h.assignedDate;
-                    const end = h.returnedDate || new Date();
+                    const start = h.assignedDate || h.clockIn;
+                    const end = h.returnedDate || h.clockOut || new Date();
+                    if (!start) return acc;
                     return acc + Math.max(0, (new Date(end) - new Date(start)) / (1000 * 60 * 60));
                 }, 0);
                 
                 const totalHours = historyHours + currentHours;
                 return {
-                    name: e.name,
+                    name: e.name || 'Unknown Equipment',
                     hoursUsed: totalHours.toFixed(1),
                     cost: (totalHours * (e.costPerHour || 0)).toFixed(2)
                 };
@@ -1040,9 +1076,11 @@ const getDetailedProjectReport = async (req, res, next) => {
             // Material Section (PurchaseOrders)
             const pos = await PurchaseOrder.find({ jobId: job._id, status: { $nin: ['Draft', 'Cancelled'] } });
             const materialData = pos.flatMap(po => po.items.map(item => ({
-                name: item.itemName,
+                itemName: item.itemName,
                 quantity: item.quantity,
-                cost: item.total
+                unitPrice: item.unitPrice,
+                cost: item.total,
+                poNumber: po.poNumber
             })));
 
             const workerTotal = Object.values(workerData).reduce((acc, w) => acc + w.cost, 0);
@@ -1051,32 +1089,61 @@ const getDetailedProjectReport = async (req, res, next) => {
             const materialTotal = materialData.reduce((acc, m) => acc + m.cost, 0);
 
             return {
+                _id: job._id,
                 jobName: job.name,
-                budget: job.budget,
+                budget: job.budget || 0,
                 status: job.status,
+                startDate: job.startDate,
+                endDate: job.endDate,
                 totalCost: (workerTotal + subTotal + equipTotal + materialTotal).toFixed(2),
+                progress: job.progress || 0,
+                tasks: taskTree,
                 workers: Object.values(workerData).map(w => ({ ...w, totalHours: w.totalHours.toFixed(1), cost: w.cost.toFixed(2) })),
                 subcontractors: Object.values(subcontractorData).map(s => ({ ...s, totalHours: s.totalHours.toFixed(1), cost: s.cost.toFixed(2) })),
                 equipment: equipData,
                 materials: materialData,
-                breakdown: {
+                summary: {
+                    totalTasks: jobTasks.length,
+                    completedTasks: jobTasks.filter(t => t.status === 'completed').length,
+                    pendingTasks: jobTasks.filter(t => t.status !== 'completed').length
+                },
+                financials: {
                     workerCost: workerTotal.toFixed(2),
                     subcontractorCost: subTotal.toFixed(2),
                     equipmentCost: equipTotal.toFixed(2),
-                    materialCost: materialTotal.toFixed(2)
+                    materialCost: materialTotal.toFixed(2),
+                    total: (workerTotal + subTotal + equipTotal + materialTotal).toFixed(2)
                 }
             };
         }));
 
-        const totalCostSum = detailedJobs.reduce((acc, j) => acc + parseFloat(j.totalCost), 0);
+        // General project aggregation
+        const totalTasksGlobal = detailedJobs.reduce((acc, j) => acc + (j.summary?.totalTasks || 0), 0) + projectTasks.length;
+        const completedTasksGlobal = detailedJobs.reduce((acc, j) => acc + (j.summary?.completedTasks || 0), 0) + projectTasks.filter(t => t.status === 'completed').length;
+        const totalCostGlobal = detailedJobs.reduce((acc, j) => acc + parseFloat(j.totalCost), 0);
+        const totalHoursGlobal = detailedJobs.reduce((acc, j) => {
+            const workerHrs = j.workers.reduce((wacc, w) => wacc + parseFloat(w.totalHours), 0);
+            const subHrs = j.subcontractors.reduce((sacc, s) => sacc + parseFloat(s.totalHours), 0);
+            return acc + workerHrs + subHrs;
+        }, 0);
+        
+        const totalWorkersGlobal = new Set(detailedJobs.flatMap(j => j.workers.map(w => w.name))).size;
 
         res.json({
             project: {
+                _id: project._id,
                 name: project.name,
-                budget: project.budget,
-                totalCost: totalCostSum.toFixed(2),
-                remainingBudget: (project.budget - totalCostSum).toFixed(2),
-                totalJobs: detailedJobs.length
+                budget: project.budget || 0,
+                totalCost: totalCostGlobal.toFixed(2),
+                remainingBudget: ( (project.budget || 0) - totalCostGlobal).toFixed(2),
+                budgetUsedPercent: project.budget > 0 ? ((totalCostGlobal / project.budget) * 100).toFixed(1) : 0,
+                totalJobs: detailedJobs.length,
+                totalTasks: totalTasksGlobal,
+                completedTasks: completedTasksGlobal,
+                pendingTasks: totalTasksGlobal - completedTasksGlobal,
+                totalWorkers: totalWorkersGlobal,
+                totalHours: totalHoursGlobal.toFixed(1),
+                rfis: projectRFIs.length
             },
             jobs: detailedJobs
         });

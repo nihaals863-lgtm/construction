@@ -80,7 +80,7 @@ const getChatRooms = async (req, res, next) => {
                 hasSub,
                 lastMessage: lastMessage ? {
                     text: lastMessage.message,
-                    sender: lastMessage.sender.fullName,
+                    sender: lastMessage.sender ? lastMessage.sender.fullName : 'Deleted User',
                     time: lastMessage.createdAt
                 } : null,
                 unreadCount,
