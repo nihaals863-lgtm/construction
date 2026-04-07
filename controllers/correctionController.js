@@ -113,8 +113,57 @@ const updateCorrectionRequest = async (req, res, next) => {
     }
 };
 
+// @desc    Delete a correction request
+// @route   DELETE /api/corrections/:id
+// @access  Private (PM, Owners, or the user who created it)
+const deleteCorrectionRequest = async (req, res, next) => {
+    try {
+        const correction = await CorrectionRequest.findById(req.params.id);
+
+        if (!correction) {
+            res.status(404);
+            throw new Error('Correction request not found');
+        }
+
+        // Only allow PM, Owner, or the creator to delete
+        if (!['PM', 'COMPANY_OWNER'].includes(req.user.role) && correction.userId.toString() !== req.user._id.toString()) {
+            res.status(403);
+            throw new Error('Not authorized to delete this request');
+        }
+
+        await correction.deleteOne();
+
+        res.json({ message: 'Correction request removed' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Delete multiple correction requests (e.g. all pending)
+// @route   POST /api/corrections/bulk-delete
+// @access  Private (PM, Owners)
+const deleteMultipleCorrections = async (req, res, next) => {
+    try {
+        if (!['PM', 'COMPANY_OWNER'].includes(req.user.role)) {
+            res.status(403);
+            throw new Error('Not authorized to perform bulk deletion');
+        }
+
+        const { ids } = req.body;
+        if (ids && ids.length > 0) {
+            await CorrectionRequest.deleteMany({ _id: { $in: ids }, companyId: req.user.companyId });
+        }
+
+        res.json({ message: 'Corrections removed successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     createCorrectionRequest,
     getCorrectionRequests,
-    updateCorrectionRequest
+    updateCorrectionRequest,
+    deleteCorrectionRequest,
+    deleteMultipleCorrections
 };

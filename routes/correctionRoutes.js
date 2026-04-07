@@ -3,7 +3,9 @@ const router = express.Router();
 const {
     createCorrectionRequest,
     getCorrectionRequests,
-    updateCorrectionRequest
+    updateCorrectionRequest,
+    deleteCorrectionRequest,
+    deleteMultipleCorrections
 } = require('../controllers/correctionController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -13,7 +15,10 @@ router.route('/')
     .post(createCorrectionRequest)
     .get(getCorrectionRequests);
 
+router.post('/bulk-delete', deleteMultipleCorrections);
+
 router.route('/:id')
-    .patch(updateCorrectionRequest);
+    .patch(updateCorrectionRequest)
+    .delete(deleteCorrectionRequest);
 
 module.exports = router;
