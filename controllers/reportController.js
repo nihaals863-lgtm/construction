@@ -12,6 +12,7 @@ const RFI = require('../models/RFI');
 const Job = require('../models/Job');
 const JobTask = require('../models/JobTask');
 const SubTask = require('../models/SubTask');
+const JobNote = require('../models/JobNote');
 
 // @desc    Get project overview report
 // @route   GET /api/reports/project/:projectId
@@ -1088,9 +1089,18 @@ const getDetailedProjectReport = async (req, res, next) => {
             const equipTotal = equipData.reduce((acc, e) => acc + parseFloat(e.cost), 0);
             const materialTotal = materialData.reduce((acc, m) => acc + m.cost, 0);
 
+            // Fetch Job Notes (detailed comments)
+            const notes = await JobNote.find({ jobId: job._id }).populate('createdBy', 'fullName').sort({ createdAt: -1 });
+
             return {
                 _id: job._id,
                 jobName: job.name,
+                description: job.description || '',
+                notes: notes.map(n => ({
+                    content: n.content,
+                    author: n.createdBy?.fullName || 'System',
+                    date: n.createdAt
+                })),
                 budget: job.budget || 0,
                 status: job.status,
                 startDate: job.startDate,
