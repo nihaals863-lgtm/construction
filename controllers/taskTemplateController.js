@@ -137,11 +137,35 @@ const createTemplateFromTask = async (req, res, next) => {
     try {
         const { taskId, isJobTask } = req.body;
         let task;
+        let onModel = isJobTask ? 'JobTask' : 'Task';
         
-        if (isJobTask) {
+        // Try searching in root tasks first
+        if (onModel === 'JobTask') {
             task = await JobTask.findOne({ _id: taskId, companyId: req.user.companyId });
         } else {
             task = await Task.findOne({ _id: taskId, companyId: req.user.companyId });
+        }
+
+        // If not found in root tasks, it might be a subtask
+        if (!task) {
+            task = await SubTask.findOne({ _id: taskId, companyId: req.user.companyId });
+            if (task) {
+                // For subtasks, the 'steps' should be gathered relative to this subtask as parent
+                const steps = await mapSubTasksToSteps(task.taskId, task._id);
+                
+                const template = await TaskTemplate.create({
+                    companyId: req.user.companyId,
+                    templateName: task.title + ' Template',
+                    taskTitle: task.title,
+                    description: task.description || task.remarks || '',
+                    assignedRole: task.assignedRoleType || 'WORKER',
+                    estimatedHours: 0,
+                    priority: (task.priority || 'Medium').charAt(0).toUpperCase() + (task.priority || 'Medium').slice(1).toLowerCase(),
+                    steps,
+                    createdBy: req.user._id
+                });
+                return res.status(201).json(template);
+            }
         }
 
         if (!task) {
@@ -229,11 +253,26 @@ const applyTemplate = async (req, res, next) => {
     }
 };
 
+const bulkDeleteTemplates = async (req, res, next) => {
+    try {
+        const { ids } = req.body;
+        if (!ids || !Array.isArray(ids)) {
+            res.status(400);
+            throw new Error('Template IDs are required in an array');
+        }
+        await TaskTemplate.deleteMany({ _id: { $in: ids }, companyId: req.user.companyId });
+        res.json({ message: 'Templates deleted successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getTemplates,
     createTemplate,
     deleteTemplate,
     updateTemplate,
     applyTemplate,
-    createTemplateFromTask
+    createTemplateFromTask,
+    bulkDeleteTemplates
 };
