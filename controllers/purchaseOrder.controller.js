@@ -99,6 +99,7 @@ exports.getAllPOs = async (req, res) => {
 exports.getSinglePO = async (req, res) => {
     try {
         const po = await PurchaseOrder.findById(req.params.id)
+            .populate('companyId')
             .populate('projectId')
             .populate('vendorId')
             .populate('createdBy', 'fullName role')

@@ -22,5 +22,6 @@ router.post('/send-drawing', authorize('COMPANY_OWNER', 'PM'), vendorController.
 // Admin Bidding View
 router.get('/bids', authorize('COMPANY_OWNER', 'PM'), vendorController.getBids);
 router.patch('/bids/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.updateBidStatus);
+router.delete('/bids/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.deleteBid);
 
 module.exports = router;

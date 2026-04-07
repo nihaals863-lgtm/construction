@@ -155,6 +155,7 @@ exports.getBids = async (req, res) => {
         const bids = await TradeBid.find({ companyId })
             .populate('vendorId', 'name email')
             .populate('drawingId', 'title')
+            .populate('companyId')
             .sort({ createdAt: -1 });
         res.json(bids);
     } catch (error) {
@@ -191,6 +192,18 @@ exports.updateBidStatus = async (req, res) => {
         const { status } = req.body;
         const bid = await TradeBid.findByIdAndUpdate(req.params.id, { status }, { new: true });
         res.json(bid);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Delete a bid
+// @route   DELETE /api/vendors/bids/:id
+exports.deleteBid = async (req, res) => {
+    try {
+        const bid = await TradeBid.findOneAndDelete({ _id: req.params.id, companyId: req.user.companyId });
+        if (!bid) return res.status(404).json({ message: 'Bid not found' });
+        res.json({ message: 'Bid deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

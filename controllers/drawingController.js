@@ -26,6 +26,7 @@ const getDrawings = async (req, res, next) => {
 
         const drawings = await Drawing.find(query)
             .populate('projectId', 'name')
+            .populate('companyId')
             .sort({ createdAt: -1 });
         res.json(drawings);
     } catch (error) {
