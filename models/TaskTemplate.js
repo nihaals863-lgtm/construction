@@ -27,6 +27,7 @@ const taskTemplateSchema = new mongoose.Schema({
     estimatedHours: { type: Number, default: 0 },
     priority: { type: String, enum: ['Low', 'Medium', 'High'], default: 'Medium' },
     steps: [stepSchema],
+    position: { type: Number, default: 0 },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

@@ -7,7 +7,7 @@ const getTemplates = async (req, res, next) => {
     try {
         const templates = await TaskTemplate.find({ companyId: req.user.companyId })
             .populate('createdBy', 'fullName')
-            .sort({ createdAt: -1 });
+            .sort({ position: 1, createdAt: -1 });
         res.json(templates);
     } catch (error) {
         next(error);
@@ -267,6 +267,28 @@ const bulkDeleteTemplates = async (req, res, next) => {
     }
 };
 
+const reorderTemplates = async (req, res, next) => {
+    try {
+        const { templates } = req.body;
+        if (!templates || !Array.isArray(templates)) {
+            res.status(400);
+            throw new Error('Templates array is required');
+        }
+
+        const bulkOps = templates.map(t => ({
+            updateOne: {
+                filter: { _id: t.id, companyId: req.user.companyId },
+                update: { $set: { position: t.position } }
+            }
+        }));
+
+        await TaskTemplate.bulkWrite(bulkOps);
+        res.json({ message: 'Templates reordered successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getTemplates,
     createTemplate,
@@ -274,5 +296,6 @@ module.exports = {
     updateTemplate,
     applyTemplate,
     createTemplateFromTask,
-    bulkDeleteTemplates
+    bulkDeleteTemplates,
+    reorderTemplates
 };
