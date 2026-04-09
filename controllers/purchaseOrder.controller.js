@@ -6,7 +6,11 @@ const Counter = require('../models/Counter');
 // Create PO
 exports.createPO = async (req, res) => {
     try {
-        const { projectId, jobId, vendorId, vendorName, vendorEmail, items, notes, expectedDeliveryDate, totalAmount, subtotal, tax } = req.body;
+        const { projectId, jobId, vendorId, vendorName, vendorEmail, items, notesToVendor, internalNotes, expectedDeliveryDate, totalAmount, subtotal, tax } = req.body;
+        
+        // Clean optional IDs
+        const cleanVendorId = vendorId || null;
+        const cleanJobId = jobId || null;
 
         // Skip strict Vendor verification if vendorName is provided
         if (vendorId) {
@@ -34,13 +38,14 @@ exports.createPO = async (req, res) => {
             companyId: req.user.companyId || req.user.company?._id || req.body.companyId,
             poNumber,
             projectId,
-            jobId,
-            vendorId,
+            jobId: cleanJobId,
+            vendorId: cleanVendorId,
             vendorName,
             vendorEmail,
             createdBy: req.user._id,
             items,
-            notes,
+            notesToVendor,
+            internalNotes,
             expectedDeliveryDate,
             status,
             subtotal,
@@ -118,18 +123,29 @@ exports.updatePO = async (req, res) => {
         const po = await PurchaseOrder.findById(req.params.id);
         if (!po) return res.status(404).json({ message: 'Purchase Order not found' });
 
-        const isStatusOnly = Object.keys(req.body).length === 1 && req.body.status;
-        const isAdmin = req.user.role === 'COMPANY_OWNER';
+        const isStatusOnly = Object.keys(req.body).length === 1 && (req.body.status !== undefined);
+        const isAdminOrPM = req.user.role === 'COMPANY_OWNER' || req.user.role === 'PM';
 
-        // Content editing (line items, etc) only in Draft
-        if (!isStatusOnly && po.status !== 'Draft') {
-            return res.status(400).json({ message: 'Only Draft POs can be edited' });
+        // Content editing (line items, etc) rules:
+        // 1. Drafts can be edited by anyone with access
+        // 2. Pending Approval and Approved can be edited by Admins/PMs
+        if (!isStatusOnly) {
+            const isDraft = po.status === 'Draft';
+            const canManagerEdit = isAdminOrPM && ['Pending Approval', 'Approved'].includes(po.status);
+            
+            if (!isDraft && !canManagerEdit) {
+                return res.status(400).json({ message: `Cannot edit Purchase Order in ${po.status} status` });
+            }
         }
 
         // Status update logic
-        if (isStatusOnly && !isAdmin && po.status !== 'Draft') {
-            return res.status(403).json({ message: 'Only Admins can change status after submission' });
+        if (isStatusOnly && !isAdminOrPM && po.status !== 'Draft') {
+            return res.status(403).json({ message: 'Only Admins/PMs can change status after submission' });
         }
+
+        // Clean optional IDs if present
+        if (req.body.vendorId === '') req.body.vendorId = null;
+        if (req.body.jobId === '') req.body.jobId = null;
 
         Object.assign(po, req.body);
         await po.save();

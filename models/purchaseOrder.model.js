@@ -63,7 +63,8 @@ const purchaseOrderSchema = new mongoose.Schema({
         enum: ['Draft', 'Pending Approval', 'Approved', 'Sent', 'Delivered', 'Closed', 'Cancelled'],
         default: 'Draft'
     },
-    notes: String,
+    notesToVendor: String,
+    internalNotes: String,
     expectedDeliveryDate: Date,
     approvedBy: {
         type: mongoose.Schema.Types.ObjectId,
