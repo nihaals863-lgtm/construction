@@ -88,7 +88,15 @@ const getChatRooms = async (req, res, next) => {
             };
         }));
 
-        res.json(rooms.filter(r => r !== null));
+        const sortedRooms = rooms
+            .filter(r => r !== null)
+            .sort((a, b) => {
+                const timeA = a.lastMessage ? new Date(a.lastMessage.time) : new Date(0);
+                const timeB = b.lastMessage ? new Date(b.lastMessage.time) : new Date(0);
+                return timeB - timeA;
+            });
+
+        res.json(sortedRooms);
     } catch (error) {
         next(error);
     }
