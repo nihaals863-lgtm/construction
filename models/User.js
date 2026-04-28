@@ -32,6 +32,9 @@ const userSchema = new mongoose.Schema({
     phone: {
         type: String
     },
+    address: {
+        type: String
+    },
     hourlyRate: {
         type: Number,
         default: 30

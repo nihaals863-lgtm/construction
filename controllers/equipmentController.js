@@ -24,7 +24,7 @@ const getEquipment = async (req, res, next) => {
                     path: 'projectId',
                     select: 'name'
                 }
-            });
+            }).lean();
         res.json(equipment);
     } catch (error) {
         next(error);
@@ -225,7 +225,8 @@ const uploadEquipmentImage = async (req, res, next) => {
 const getAllEquipmentHistory = async (req, res, next) => {
     try {
         const allEquipment = await Equipment.find({ companyId: req.user.companyId })
-            .select('name category type serialNumber assignmentHistory imageUrl');
+            .select('name category type serialNumber assignmentHistory imageUrl')
+            .lean();
 
         // Flatten all history records with equipment metadata
         const allHistory = [];

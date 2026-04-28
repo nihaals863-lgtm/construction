@@ -92,23 +92,41 @@ const loginUser = async (req, res, next) => {
         const user = await User.findOne({ email });
 
         if (user && (await user.matchPassword(password))) {
+            console.log('DEBUG [login]: Password matched for', email);
             if (!user.isActive) {
                 res.status(401);
                 throw new Error('Your account is currently under review by the Super Admin. Once all required checks are completed, your access will be approved. Please wait or contact your administrator for updates');
             }
 
             // Check if company's plan is expired
-            if (user.companyId) { // Check only if user belongs to a company
-                const company = await Company.findById(user.companyId);
+            let company = null;
+            if (user.companyId) {
+                console.log('DEBUG [login]: Fetching company and plan for companyId:', user.companyId);
+                company = await Company.findById(user.companyId).populate('subscriptionPlanId').lean();
+                console.log('DEBUG [login]: Company found:', company ? company.name : 'null');
+                
                 if (company) {
                     if (company.expireDate && new Date(company.expireDate) < new Date()) {
                         res.status(401);
                         throw new Error('Company subscription plan has expired. Please contact support to renew.');
                     }
+                    // Attach company/plan info to user object for permission check
+                    user.companyDetails = company;
                 }
             }
 
-            const permissions = await fetchUserPermissions(user);
+            console.log('DEBUG [login]: Fetching permissions...');
+            const startTime = Date.now();
+            
+            // Convert to plain object and attach companyDetails so fetchUserPermissions can use them
+            const userObj = user.toObject();
+            userObj.companyDetails = company;
+            
+            const permissions = await fetchUserPermissions(userObj);
+            console.log(`DEBUG [login]: Permissions fetched in ${Date.now() - startTime}ms, count: ${permissions.length}`);
+
+            const token = generateToken(user._id, user.role, user.companyId);
+            console.log('DEBUG [login]: Token generated, sending response');
 
             res.json({
                 _id: user._id,
@@ -117,7 +135,7 @@ const loginUser = async (req, res, next) => {
                 role: user.role,
                 companyId: user.companyId,
                 avatar: user.avatar,
-                token: generateToken(user._id, user.role, user.companyId),
+                token,
                 permissions
             });
         } else {
@@ -191,6 +209,7 @@ const getMe = async (req, res, next) => {
                 role: user.role,
                 companyId: user.companyId,
                 avatar: user.avatar,
+                companyDetails: user.companyId ? await Company.findById(user.companyId).populate('subscriptionPlanId').lean() : null
             });
         } else {
             res.status(404);
@@ -220,8 +239,7 @@ const getUsers = async (req, res, next) => {
         }
 
         console.log('getUsers query:', query);
-        const users = await User.find(query).select('-password');
-        console.log('getUsers found count:', users.length);
+        const users = await User.find(query).select('-password').lean();
         res.json(users);
     } catch (error) {
         console.error('getUsers error:', error);
@@ -250,6 +268,10 @@ const updateUser = async (req, res, next) => {
         // Update fields
         Object.keys(req.body).forEach(key => {
             if (key !== '_id' && key !== 'companyId') {
+                // Ignore empty password strings to prevent validation errors
+                if (key === 'password' && (req.body[key] === '' || req.body[key] == null)) {
+                    return;
+                }
                 user[key] = req.body[key];
             }
         });
@@ -368,26 +390,32 @@ const updatePassword = async (req, res, next) => {
 // @access  Private
 const updateProfile = async (req, res, next) => {
     try {
-        const user = await User.findById(req.user._id);
+        const updateData = { ...req.body };
+        if (req.file) {
+            updateData.avatar = req.file.path;
+        }
+
+        const user = await User.findByIdAndUpdate(req.user._id, updateData, {
+            new: true,
+            runValidators: true
+        }).select('-password').lean();
 
         if (!user) {
             res.status(404);
             throw new Error('User not found');
         }
 
-        const { fullName, email, avatar, phone } = req.body;
+        // If user is a company owner, also sync these basic details to the Company model
+        if (user.role === 'COMPANY_OWNER' && user.companyId) {
+            const company = await Company.findById(user.companyId);
+            if (company) {
+                if (req.body.address) company.address = req.body.address;
+                if (req.body.phone) company.phone = req.body.phone;
+                await company.save();
+            }
+        }
 
-        if (fullName) user.fullName = fullName;
-        if (email) user.email = email;
-        if (avatar) user.avatar = avatar;
-        if (phone) user.phone = phone;
-
-        await user.save();
-
-        const updatedUser = user.toObject();
-        delete updatedUser.password;
-
-        res.json(updatedUser);
+        res.json(user);
     } catch (error) {
         next(error);
     }

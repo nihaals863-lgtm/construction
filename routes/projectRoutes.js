@@ -21,9 +21,9 @@ router.use(protect); // All routes protected
 router.get('/', getProjects);
 router.get('/:id', getProjectById);
 router.get('/:id/members', getProjectMembers);
-router.post('/', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), checkProjectLimit, createProject);
-router.post('/:id/assign-pm', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), updateProject); // Reuse updateProject for now or create specific controller
-router.patch('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), updateProject);
+router.post('/', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), checkProjectLimit, upload.single('image'), createProject);
+router.post('/:id/assign-pm', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), updateProject); 
+router.patch('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), upload.single('image'), updateProject);
 router.get('/:id/client-progress', getClientProgress);
 router.get('/:id/client-updates', getProjectClientUpdates);
 router.post('/:id/client-updates', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), upload.array('images', 5), createProjectClientUpdate);

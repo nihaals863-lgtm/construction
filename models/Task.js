@@ -15,8 +15,10 @@ const taskSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ['TASK', 'TODO'],
-        default: 'TASK'
+        enum: ['TASK', 'TODO', 'IN-PROGRESS', 'IN_PROGRESS', 'DONE', 'COMPLETED', 'task', 'todo'], // Kept lowercase in enum just incase, but normalization will handle it
+        default: 'TASK',
+        uppercase: true,
+        trim: true
     },
     projectId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -73,8 +75,10 @@ const taskSchema = new mongoose.Schema({
     },
     priority: {
         type: String,
-        enum: ['Low', 'Medium', 'High'],
-        default: 'Medium'
+        enum: ['low', 'medium', 'high', 'Low', 'Medium', 'High', 'LOW', 'MEDIUM', 'HIGH'],
+        default: 'low',
+        lowercase: true,
+        trim: true
     },
     attachments: [{
         name: String,

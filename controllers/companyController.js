@@ -148,10 +148,16 @@ const getCompanies = async (req, res, next) => {
             .select('-password');
 
         // Map to a structure that the frontend expects, merging user and company info
-        const companies = users.map(user => {
+        const companies = await Promise.all(users.map(async (user) => {
             const company = user.companyId || {};
             const plan = company.subscriptionPlanId || {};
             
+            // Recalculate real counts
+            const [userCount, projectCount] = await Promise.all([
+                User.countDocuments({ companyId: company._id }),
+                Project.countDocuments({ companyId: company._id })
+            ]);
+
             return {
                 ...company._doc, // Company details
                 ...user._doc,    // User details (overwrites _id with user._id)
@@ -163,9 +169,10 @@ const getCompanies = async (req, res, next) => {
                 phone: user.phone || company.phone,
                 planName: plan.name || 'No Plan', // Include plan name
                 planDetails: plan, // Include full plan details if needed
-                users: company.users // Keep existing virtuals/fields if any
+                users: userCount, // Real user count
+                projects: projectCount // Real project count
             };
-        });
+        }));
 
         res.json(companies);
     } catch (error) {

@@ -44,7 +44,9 @@ exports.getVendors = async (req, res) => {
             query.name = { $regex: req.query.search, $options: 'i' };
         }
 
-        const vendors = await Vendor.find(query);
+        const vendors = await Vendor.find(query)
+            .select('name email category status phone businessAddress contactPerson attachments')
+            .lean();
         res.json(vendors);
     } catch (error) {
         res.status(500).json({ message: error.message });

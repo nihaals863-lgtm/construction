@@ -13,7 +13,8 @@ const getTodos = async (req, res, next) => {
 
         const todos = await Todo.find(query)
             .sort({ createdAt: -1 })
-            .populate('assignedBy', 'fullName role');
+            .populate('assignedBy', 'fullName role')
+            .lean();
 
         res.json(todos);
     } catch (error) {
@@ -31,7 +32,8 @@ const getAssignedByMeTodos = async (req, res, next) => {
 
         const todos = await Todo.find(query)
             .sort({ createdAt: -1 })
-            .populate('assignedTo', 'fullName role');
+            .populate('assignedTo', 'fullName role')
+            .lean();
 
         res.json(todos);
     } catch (error) {

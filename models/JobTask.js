@@ -66,6 +66,14 @@ const jobTaskSchema = new mongoose.Schema({
     position: {
         type: Number,
         default: 0
+    },
+    progress: {
+        type: Number,
+        default: 0
+    },
+    subTaskCount: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true

@@ -50,6 +50,11 @@ const photoSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Optimization: Added indexes for faster queries
+photoSchema.index({ companyId: 1 });
+photoSchema.index({ projectId: 1 });
+photoSchema.index({ companyId: 1, createdAt: -1 }); // For gallery sorting
+
 const Photo = mongoose.model('Photo', photoSchema);
 
 module.exports = Photo;

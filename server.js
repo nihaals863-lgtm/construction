@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config(); // Forced restart applied
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -186,6 +186,8 @@ const PORT = process.env.PORT || 8080;
 connectDB().then(() => {
     server.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
+        // If logs do not show this line after deploy, the running container is not on the latest build.
+        console.log('[Chat policy] PM may initiate direct messages with clients (assertDirectMessagingAllowed in chatController.js)');
     });
 }).catch(err => {
     console.error('Failed to connect to MongoDB', err);

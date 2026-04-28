@@ -2,18 +2,18 @@ const express = require('express');
 const router = express.Router();
 const vendorController = require('../controllers/vendorController');
 const { protect, authorize } = require('../middlewares/authMiddleware');
-const upload = require('../middlewares/fileUploadMiddleware');
+const { upload, imageKitUpload } = require('../middlewares/imageKitUploadMiddleware');
 
 // Public Routes (For External Trades)
 router.get('/public/drawing/:id', vendorController.getPublicDrawingInfo);
-router.post('/public/submit-bid', upload.array('files'), vendorController.submitBid);
+router.post('/public/submit-bid', upload.array('files'), imageKitUpload, vendorController.submitBid);
 
 router.use(protect);
 
 // Vendor/Trade Management
-router.post('/', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), vendorController.createVendor);
+router.post('/', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), imageKitUpload, vendorController.createVendor);
 router.get('/', vendorController.getVendors);
-router.patch('/:id', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), vendorController.updateVendor);
+router.patch('/:id', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), imageKitUpload, vendorController.updateVendor);
 router.delete('/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.deleteVendor);
 
 // Drawing Distribution

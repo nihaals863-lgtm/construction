@@ -1,142 +1,59 @@
 const Role = require('../models/Role');
-const Permission = require('../models/Permission');
 const RolePermission = require('../models/RolePermission');
 const UserPermission = require('../models/UserPermission');
-const User = require('../models/User');
+const Permission = require('../models/Permission');
 const Company = require('../models/Company');
 const Plan = require('../models/Plan');
 
 // @desc    Get all roles
 // @route   GET /api/roles
-// @access  Private (SUPER_ADMIN, COMPANY_OWNER)
+// @access  Private (Admin)
 const getRoles = async (req, res, next) => {
     try {
-        const roles = await Role.find().sort({ name: 1 });
-
-        // Fetch all role permissions in one go
-        const roleIds = roles.map(r => r._id);
-        const allRolePerms = await RolePermission.find({ roleId: { $in: roleIds } }).populate('permissionId');
-
-        // Group by roleId
-        const permsByRole = allRolePerms.reduce((acc, rp) => {
-            if (!acc[rp.roleId]) acc[rp.roleId] = [];
-            if (rp.permissionId) acc[rp.roleId].push(rp.permissionId.key);
-            return acc;
-        }, {});
-
-        const rolesWithPerms = roles.map(role => ({
-            _id: role._id,
-            name: role.name,
-            description: role.description,
-            permissions: permsByRole[role._id] || []
+        const roles = await Role.find();
+        
+        // Enhance roles with their permissions
+        const rolesWithPermissions = await Promise.all(roles.map(async (role) => {
+            const rolePermDocs = await RolePermission.find({ roleId: role._id }).populate('permissionId');
+            return {
+                ...role.toObject(),
+                permissions: rolePermDocs
+                    .filter(rp => rp.permissionId)
+                    .map(rp => rp.permissionId.key)
+            };
         }));
-
-        res.json(rolesWithPerms);
+        
+        res.json(rolesWithPermissions);
     } catch (error) {
         next(error);
     }
 };
 
-// @desc    Update permissions for a specific role
-// @route   PUT /api/roles/:roleName
-// @access  Private (Admin)
-const updateRolePermissions = async (req, res, next) => {
-    try {
-        const { roleName } = req.params;
-        const { permissions } = req.body; // Array of permission keys
-
-        const role = await Role.findOne({ name: roleName });
-        if (!role) {
-            res.status(404);
-            throw new Error('Role not found');
-        }
-
-        // 1. Delete existing permissions for this role
-        await RolePermission.deleteMany({ roleId: role._id });
-
-        // 2. Add new permissions
-        if (permissions && Array.isArray(permissions)) {
-            for (const key of permissions) {
-                const perm = await Permission.findOne({ key });
-                if (perm) {
-                    await RolePermission.create({
-                        roleId: role._id,
-                        permissionId: perm._id
-                    });
-                }
-            }
-        }
-
-        res.json({ message: `Permissions for role ${roleName} updated successfully` });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Get all system permissions grouped by module
+// @desc    Get all permissions
 // @route   GET /api/roles/permissions
 // @access  Private (Admin)
 const getAllPermissions = async (req, res, next) => {
     try {
-        const permissions = await Permission.find().sort({ module: 1, key: 1 });
+        const permissions = await Permission.find().sort({ module: 1, name: 1 });
         res.json(permissions);
     } catch (error) {
         next(error);
     }
 };
 
-// @desc    Bulk update permissions for multiple roles
-// @route   PUT /api/roles/bulk
-// @access  Private (Admin)
-const bulkUpdateRolePermissions = async (req, res, next) => {
-    try {
-        const { roleUpdates } = req.body; // Array of { roleName: 'PM', permissions: ['VIEW_TASKS', ...] }
-
-        if (!roleUpdates || !Array.isArray(roleUpdates)) {
-            res.status(400);
-            throw new Error('Invalid role updates data');
-        }
-
-        for (const update of roleUpdates) {
-            const role = await Role.findOne({ name: update.roleName });
-            if (!role) continue;
-
-            // Delete existing permissions for this role
-            await RolePermission.deleteMany({ roleId: role._id });
-
-            // Add new permissions
-            if (update.permissions && Array.isArray(update.permissions)) {
-                for (const key of update.permissions) {
-                    const perm = await Permission.findOne({ key });
-                    if (perm) {
-                        await RolePermission.create({
-                            roleId: role._id,
-                            permissionId: perm._id
-                        });
-                    }
-                }
-            }
-        }
-
-        res.json({ message: 'Bulk permissions updated successfully' });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Get permissions for a specific user (Role base + Overrides)
+// @desc    Get user permissions (including overrides)
 // @route   GET /api/roles/user/:userId
 // @access  Private (Admin)
 const getUserPermissions = async (req, res, next) => {
     try {
         const { userId } = req.params;
-        const user = await User.findById(userId).populate('roleId');
+        const user = await require('../models/User').findById(userId);
         if (!user) {
             res.status(404);
             throw new Error('User not found');
         }
 
-        let roleId = user.roleId?._id || user.roleId; // Handle both populated and unpopulated
+        let roleId = user.roleId;
         if (!roleId) {
             const roleDoc = await Role.findOne({ name: user.role });
             if (roleDoc) roleId = roleDoc._id;
@@ -192,77 +109,78 @@ const updateUserOverrides = async (req, res, next) => {
 
 // Helper function to get permissions for a user
 const fetchUserPermissions = async (user) => {
-    let roleId = user.roleId?._id || user.roleId;
+    try {
+        let roleId = user.roleId?._id || user.roleId;
 
-    if (!roleId) {
-        const roleDoc = await Role.findOne({ name: user.role });
-        if (roleDoc) roleId = roleDoc._id;
-    }
-
-    // Parallel fetch for efficiency: Fetch all role-based perms and all user overrides
-    const [rolePermDocs, overrideDocs] = await Promise.all([
-        roleId ? RolePermission.find({ roleId }).populate('permissionId') : [],
-        UserPermission.find({ userId: user._id }).populate('permissionId')
-    ]);
-
-    // Create a set of keys allowed by the role
-    const permissions = new Set(
-        rolePermDocs
-            .filter(rp => rp.permissionId)
-            .map(rp => rp.permissionId.key)
-    );
-
-    // Apply overrides: Add if allowed, remove if explicitly denied
-    overrideDocs.forEach(o => {
-        if (o.permissionId) {
-            if (o.isAllowed) {
-                permissions.add(o.permissionId.key);
-            } else {
-                permissions.delete(o.permissionId.key);
-            }
+        if (!roleId) {
+            const roleDoc = await Role.findOne({ name: user.role });
+            if (roleDoc) roleId = roleDoc._id;
         }
-    });
 
-    const finalPermissions = Array.from(permissions);
+        const [rolePermDocs, overrideDocs] = await Promise.all([
+            roleId ? RolePermission.find({ roleId }).populate('permissionId') : [],
+            UserPermission.find({ userId: user._id }).populate('permissionId')
+        ]);
 
-    // PLAN FILTERING:
-    // If the user belongs to a company, filter their permissions against the company's subscription plan.
-    if (user.companyId) {
-        try {
-            const company = await Company.findById(user.companyId);
-            if (company && company.subscriptionPlanId) {
-                const mongoose = require('mongoose');
-                const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
-                    ? { _id: company.subscriptionPlanId }
-                    : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+        const permissions = new Set(
+            rolePermDocs
+                .filter(rp => rp.permissionId)
+                .map(rp => rp.permissionId.key)
+        );
 
-                const plan = await Plan.findOne(planQuery);
-                if (plan && plan.rolePermissions && plan.rolePermissions instanceof Map) {
-                    // Map company roles to plan keys
-                    const roleKey = user.role.toUpperCase().replace(/\s/g, '_');
-                    
-                    // Search for permissions in the plan using the role key or common aliases
-                    let allowedByPlan = plan.rolePermissions.get(roleKey);
-                    
-                    // Fallbacks for legacy plan versions or naming differences
-                    if (!allowedByPlan) {
-                        if (roleKey === 'COMPANY_OWNER') allowedByPlan = plan.rolePermissions.get('ADMIN');
-                        if (roleKey === 'PM') allowedByPlan = plan.rolePermissions.get('PROJECT_MANAGER');
-                    }
-                    
-                    // If the plan has specific permissions for this role, filter against it
-                    if (allowedByPlan && Array.isArray(allowedByPlan)) {
-                        return finalPermissions.filter(p => allowedByPlan.includes(p));
-                    }
+        overrideDocs.forEach(o => {
+            if (o.permissionId) {
+                if (o.isAllowed) {
+                    permissions.add(o.permissionId.key);
+                } else {
+                    permissions.delete(o.permissionId.key);
                 }
             }
-        } catch (error) {
-            console.error('Plan-based permission filtering error:', error);
-            // Default to granting standard permissions if filtering fails
-        }
-    }
+        });
 
-    return finalPermissions;
+        let finalPermissions = Array.from(permissions);
+
+        if (user.companyId) {
+            let plan = null;
+            if (user.companyDetails && user.companyDetails.subscriptionPlanId) {
+                plan = user.companyDetails.subscriptionPlanId;
+            } else {
+                const company = await Company.findById(user.companyId).lean();
+                if (company && company.subscriptionPlanId) {
+                    const mongoose = require('mongoose');
+                    const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
+                        ? { _id: company.subscriptionPlanId }
+                        : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+                    plan = await Plan.findOne(planQuery).lean();
+                }
+            }
+
+            if (plan && plan.rolePermissions) {
+                const roleKey = user.role.toUpperCase().replace(/\s/g, '_');
+                let allowedByPlan = (plan.rolePermissions instanceof Map)
+                    ? plan.rolePermissions.get(roleKey)
+                    : plan.rolePermissions[roleKey];
+
+                if (!allowedByPlan) {
+                    if (roleKey === 'COMPANY_OWNER') {
+                        allowedByPlan = (plan.rolePermissions instanceof Map) ? plan.rolePermissions.get('ADMIN') : plan.rolePermissions['ADMIN'];
+                    }
+                    if (roleKey === 'PM') {
+                        allowedByPlan = (plan.rolePermissions instanceof Map) ? plan.rolePermissions.get('PROJECT_MANAGER') : plan.rolePermissions['PROJECT_MANAGER'];
+                    }
+                }
+
+                if (allowedByPlan && Array.isArray(allowedByPlan)) {
+                    finalPermissions = finalPermissions.filter(p => allowedByPlan.includes(p));
+                }
+            }
+        }
+
+        return finalPermissions;
+    } catch (error) {
+        console.error('Permission fetching error:', error);
+        return [];
+    }
 };
 
 // @desc    Get permissions for current user
@@ -280,6 +198,62 @@ const getMyPermissions = async (req, res, next) => {
             role: req.user.role,
             permissions
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateRolePermissions = async (req, res, next) => {
+    try {
+        const { roleName } = req.params;
+        const { permissions } = req.body; // Array of permission keys
+
+        const role = await Role.findOne({ name: roleName });
+        if (!role) {
+            res.status(404);
+            throw new Error('Role not found');
+        }
+
+        await RolePermission.deleteMany({ roleId: role._id });
+
+        for (const key of permissions) {
+            const perm = await Permission.findOne({ key });
+            if (perm) {
+                await RolePermission.create({
+                    roleId: role._id,
+                    permissionId: perm._id
+                });
+            }
+        }
+
+        res.json({ message: 'Role permissions updated successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const bulkUpdateRolePermissions = async (req, res, next) => {
+    try {
+        const { roleUpdates } = req.body;
+
+        for (const update of roleUpdates) {
+            const { roleName, permissions } = update;
+            const role = await Role.findOne({ name: roleName });
+            if (role) {
+                await RolePermission.deleteMany({ roleId: role._id });
+                for (const key of permissions) {
+                    const perm = await Permission.findOne({ key });
+                    if (perm) {
+                        await RolePermission.create({
+                            roleId: role._id,
+                            permissionId: perm._id
+                        });
+                    }
+                }
+            }
+        }
+
+        res.json({ message: 'All role permissions updated successfully' });
     } catch (error) {
         next(error);
     }

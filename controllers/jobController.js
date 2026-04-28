@@ -16,63 +16,55 @@ const updateProjectStats = async (projectId) => {
 // GET /jobs?projectId=xxx  — list jobs for a project
 const getJobs = async (req, res) => {
     try {
-        const filter = {};
-        if (req.user.role !== 'SUPER_ADMIN') {
-            filter.companyId = req.user.companyId;
+        const { role, _id: userId, companyId } = req.user;
+        const filter = { companyId };
+        
+        if (role === 'SUPER_ADMIN') {
+            delete filter.companyId;
         }
 
-        // If projectId is provided, use it
         if (req.query.projectId) {
             filter.projectId = req.query.projectId;
         }
 
         // Role-based visibility
-        if (req.user.role === 'PM') {
-            // PM sees jobs for projects where they are the PM OR the creator
+        if (role === 'PM') {
             const managedProjects = await Project.find({
-                companyId: req.user.companyId,
-                $or: [{ pmId: req.user._id }, { createdBy: req.user._id }]
-            }).select('_id');
+                companyId,
+                $or: [{ pmId: userId }, { createdBy: userId }]
+            }).select('_id').lean();
+            
             const projectIds = managedProjects.map(p => p._id);
-
-            // Visibility criteria for PM:
-            // 1. Job is in a project they manage (PM/Creator)
-            // 2. Job was created by them
-            // 3. Job is assigned to them as a foreman (dual role)
             filter.$or = [
                 { projectId: { $in: projectIds } },
-                { createdBy: req.user._id },
-                { foremanId: req.user._id }
+                { createdBy: userId },
+                { foremanId: userId }
             ];
-        } else if (req.user.role === 'FOREMAN') {
+        } else if (['FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(role)) {
             const JobTask = require('../models/JobTask');
             const userTasks = await JobTask.find({
-                $or: [{ assignedTo: req.user._id }, { assignedForeman: req.user._id }]
-            }).select('jobId');
+                $or: [{ assignedTo: userId }, { assignedForeman: userId }]
+            }).select('jobId').lean();
+            
             const taskJobIds = userTasks.map(t => t.jobId);
             filter.$or = [
-                { foremanId: req.user._id },
-                { _id: { $in: taskJobIds } }
-            ];
-        } else if (req.user.role === 'WORKER') {
-            const JobTask = require('../models/JobTask');
-            const userTasks = await JobTask.find({ assignedTo: req.user._id }).select('jobId');
-            const taskJobIds = userTasks.map(t => t.jobId);
-            filter.$or = [
-                { assignedWorkers: { $in: [req.user._id] } },
+                { foremanId: userId },
+                { assignedWorkers: userId }, // Mongo simplifies array $in automatically
                 { _id: { $in: taskJobIds } }
             ];
         }
 
         const jobs = await Job.find(filter)
-            .populate('foremanId', 'fullName role')
-            .populate('assignedWorkers', 'fullName role')
+            .populate('foremanId', 'fullName role avatar')
+            .populate('assignedWorkers', 'fullName role avatar')
             .populate({
                 path: 'projectId',
                 select: 'name pmId',
-                populate: { path: 'pmId', select: 'fullName' }
+                populate: { path: 'pmId', select: 'fullName avatar' }
             })
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
+            
         res.json(jobs);
     } catch (err) {
         res.status(500).json({ message: err.message });

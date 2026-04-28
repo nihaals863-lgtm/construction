@@ -50,6 +50,11 @@ const drawingSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Optimization: Added indexes for faster queries
+drawingSchema.index({ companyId: 1 });
+drawingSchema.index({ projectId: 1 });
+drawingSchema.index({ companyId: 1, createdAt: -1 }); // For list view sorting
+
 const Drawing = mongoose.model('Drawing', drawingSchema);
 
 module.exports = Drawing;

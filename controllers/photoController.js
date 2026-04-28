@@ -1,5 +1,7 @@
 const Photo = require('../models/Photo');
 const Project = require('../models/Project');
+const Job = require('../models/Job');
+const mongoose = require('mongoose');
 
 // @desc    Get all photos
 // @route   GET /api/photos
@@ -10,7 +12,6 @@ const getPhotos = async (req, res, next) => {
 
         // PM / Foreman / Worker Visibility Logic
         if (['PM', 'FOREMAN', 'WORKER'].includes(req.user.role)) {
-            const Job = require('../models/Job');
             const jobFilter = { companyId: req.user.companyId };
 
             if (req.user.role === 'PM') {
@@ -24,20 +25,19 @@ const getPhotos = async (req, res, next) => {
                 jobFilter.assignedWorkers = req.user._id;
             }
 
-            const assignedJobs = await Job.find(jobFilter).select('projectId');
+            const assignedJobs = await Job.find(jobFilter).select('projectId').lean();
             const jobProjectIds = assignedJobs
                 .filter(j => j.projectId)
                 .map(j => j.projectId.toString());
 
             if (req.user.role === 'PM') {
-                const Project = require('../models/Project');
                 const directProjects = await Project.find({
                     companyId: req.user.companyId,
                     $or: [
                         { pmId: req.user._id },
                         { createdBy: req.user._id }
                     ]
-                }).select('_id');
+                }).select('_id').lean();
                 const directProjectIds = directProjects.map(p => p._id.toString());
                 const allProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
                 query.projectId = { $in: allProjectIds };
@@ -47,8 +47,6 @@ const getPhotos = async (req, res, next) => {
         }
 
         if (req.query.projectId) {
-            // Further filter by specific projectId if provided
-            // For security, if they provided one, ensure it's in their allowed list if they are a restricted role
             if (query.projectId && query.projectId.$in) {
                 if (!query.projectId.$in.includes(req.query.projectId)) {
                     return res.status(403).json({ message: 'Not authorized for this project' });
@@ -59,9 +57,11 @@ const getPhotos = async (req, res, next) => {
         if (req.query.taskId) query.taskId = req.query.taskId;
 
         const photos = await Photo.find(query)
+            .select('-companyId')
             .populate('projectId', 'name')
             .populate('uploadedBy', 'fullName')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
 
         res.json(photos);
     } catch (error) {
@@ -102,7 +102,12 @@ const uploadPhoto = async (req, res, next) => {
             description
         });
 
-        res.status(201).json(photo);
+        const populated = await Photo.findById(photo._id)
+            .populate('projectId', 'name')
+            .populate('uploadedBy', 'fullName')
+            .lean();
+
+        res.status(201).json(populated);
     } catch (error) {
         next(error);
     }

@@ -8,13 +8,15 @@ const {
     getForemanAttendanceReport,
     getProjectAttendanceReport,
     exportAttendanceReport,
-    getDetailedProjectReport
+    getDetailedProjectReport,
+    getSidebarMetrics
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middlewares/authMiddleware');
 
 router.use(protect);
 
 router.get('/stats', getDashboardStats);
+router.get('/sidebar-metrics', getSidebarMetrics);
 router.get('/company', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), getCompanyReport);
 router.get('/project/:projectId', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), getProjectReport);
 router.get('/detailed/:projectId', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), getDetailedProjectReport);

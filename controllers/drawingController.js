@@ -1,5 +1,8 @@
 const Drawing = require('../models/Drawing');
 const DrawingAnnotation = require('../models/DrawingAnnotation');
+const Job = require('../models/Job');
+const Project = require('../models/Project');
+const mongoose = require('mongoose');
 
 // @desc    Get all drawings
 // @route   GET /api/drawings
@@ -8,26 +11,68 @@ const getDrawings = async (req, res, next) => {
     try {
         const query = { companyId: req.user.companyId };
 
-        // Filter projects for clients
-        if (req.user.role === 'CLIENT') {
-            const Project = require('../models/Project');
-            const clientProjects = await Project.find({ clientId: req.user._id }).select('_id');
-            const projectIds = clientProjects.map(p => p._id);
+        if (['PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(req.user.role)) {
+            const jobFilter = { companyId: req.user.companyId };
+
+            if (req.user.role === 'PM') {
+                jobFilter.$or = [
+                    { foremanId: req.user._id },
+                    { createdBy: req.user._id }
+                ];
+            } else if (['FOREMAN', 'SUBCONTRACTOR'].includes(req.user.role)) {
+                jobFilter.foremanId = req.user._id;
+            } else {
+                jobFilter.assignedWorkers = req.user._id;
+            }
+
+            const assignedJobs = await Job.find(jobFilter).select('projectId').lean();
+            const jobProjectIds = assignedJobs
+                .filter(j => j.projectId)
+                .map(j => j.projectId.toString());
+
+            let finalAllowedProjectIds = jobProjectIds;
+
+            if (req.user.role === 'PM') {
+                const directProjects = await Project.find({
+                    companyId: req.user.companyId,
+                    $or: [
+                        { pmId: req.user._id },
+                        { createdBy: req.user._id }
+                    ]
+                }).select('_id').lean();
+                const directProjectIds = directProjects.map(p => p._id.toString());
+                finalAllowedProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
+            }
+
+            query.projectId = { $in: finalAllowedProjectIds };
+
+        } else if (req.user.role === 'CLIENT') {
+            const clientProjects = await Project.find({ clientId: req.user._id }).select('_id').lean();
+            const projectIds = clientProjects.map(p => p._id.toString());
             query.projectId = { $in: projectIds };
         }
 
+        // Apply additional filter if projectId is provided in query params
         if (req.query.projectId) {
-            // If projectId is provided, ensure it's one of the client's projects
-            if (req.user.role === 'CLIENT' && !query.projectId.$in.some(id => id.toString() === req.query.projectId)) {
-                return res.status(403).json({ message: 'Not authorized to access this project drawings' });
+            // Authorization check for restricted roles
+            if (['CLIENT', 'PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(req.user.role)) {
+                const allowedIds = query.projectId?.$in || [];
+                if (!allowedIds.includes(req.query.projectId.toString())) {
+                    return res.status(403).json({ message: 'Not authorized to access this project drawings' });
+                }
             }
             query.projectId = req.query.projectId;
         }
 
-        const drawings = await Drawing.find(query)
-            .populate('projectId', 'name')
-            .populate('companyId')
-            .sort({ createdAt: -1 });
+        // Optimization: Use projection to only get the latest version and essential fields
+        const drawings = await Drawing.find(query, {
+            versions: { $slice: -1 } // Only retrieve the most recent version
+        })
+        .select('title drawingNumber category currentVersion status projectId createdAt')
+        .populate('projectId', 'name')
+        .sort({ createdAt: -1 })
+        .lean();
+
         res.json(drawings);
     } catch (error) {
         next(error);
@@ -148,7 +193,8 @@ const getDrawingAnnotations = async (req, res, next) => {
 
         const annotations = await DrawingAnnotation.find(query)
             .populate('userId', 'fullName role')
-            .sort({ createdAt: 1 });
+            .sort({ createdAt: 1 })
+            .lean();
 
         res.json(annotations);
     } catch (error) {
