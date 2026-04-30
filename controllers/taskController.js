@@ -13,9 +13,8 @@ const validateAssignmentHierarchy = async (assignerRole, assigneeIds) => {
     if (!assigneeIds || assigneeIds.length === 0) return null; // No assignees is fine
     const assignees = await User.find({ _id: { $in: assigneeIds } }).select('role fullName');
     for (const assignee of assignees) {
-        if (assignerRole === 'PM' && assignee.role === 'WORKER') {
-            return `Project Manager cannot directly assign tasks to a Worker. Assign to Foreman or Subcontractor first. (Tried to assign to: ${assignee.fullName})`;
-        }
+        // PM can assign to anyone (Foreman, Subcontractor, Worker)
+
         if (['FOREMAN', 'SUBCONTRACTOR'].includes(assignerRole) && !['WORKER'].includes(assignee.role)) {
             return `${assignerRole} can only assign tasks to Workers. (Tried to assign to: ${assignee.fullName} who is ${assignee.role})`;
         }
