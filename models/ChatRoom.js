@@ -39,6 +39,10 @@ const chatRoomSchema = new mongoose.Schema({
 // Index for quick lookups
 chatRoomSchema.index({ companyId: 1, roomType: 1 });
 chatRoomSchema.index({ projectId: 1 });
+chatRoomSchema.index(
+    { companyId: 1, roomType: 1, 'metadata.directPair': 1 },
+    { unique: true, partialFilterExpression: { roomType: 'DIRECT', isActive: true } }
+);
 
 const ChatRoom = mongoose.model('ChatRoom', chatRoomSchema);
 

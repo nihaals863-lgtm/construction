@@ -102,12 +102,28 @@ const taskSchema = new mongoose.Schema({
     subTaskCount: {
         type: Number,
         default: 0
+    },
+    parentTaskId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Task',
+        default: null
+    },
+    level: {
+        type: Number,
+        default: 0
+    },
+    path: {
+        type: String,
+        default: ''
     }
 }, {
     timestamps: true
 });
 
 // Indexes for performance
+taskSchema.index({ parentTaskId: 1 });
+taskSchema.index({ path: 1 });
+taskSchema.index({ companyId: 1, projectId: 1, parentTaskId: 1, position: 1 });
 taskSchema.index({ companyId: 1, projectId: 1, status: 1 });
 taskSchema.index({ companyId: 1, assignedTo: 1 });
 taskSchema.index({ companyId: 1, dueDate: 1 });

@@ -3,7 +3,12 @@ const ChatRoom = require('../models/ChatRoom');
 const ChatParticipant = require('../models/ChatParticipant');
 const Project = require('../models/Project');
 const User = require('../models/User');
+const Task = require('../models/Task');
+const Job = require('../models/Job');
 const mongoose = require('mongoose');
+
+const ADMIN_ROLES = ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'];
+const INTERNAL_ROLES = ['COMPANY_OWNER', 'PM', 'FOREMAN', 'WORKER', 'SUPER_ADMIN', 'ADMIN'];
 
 /** Find existing DIRECT room between two users, or null */
 async function findExistingDirectRoomId(userIdA, userIdB) {
@@ -14,11 +19,23 @@ async function findExistingDirectRoomId(userIdA, userIdB) {
         { $group: { _id: '$roomId', count: { $sum: 1 } } },
         { $match: { count: 2 } }
     ]);
+    const directRooms = [];
     for (const ep of existingParticipants) {
-        const room = await ChatRoom.findOne({ _id: ep._id, roomType: 'DIRECT' });
-        if (room) return room._id;
+        const room = await ChatRoom.findOne({ _id: ep._id, roomType: 'DIRECT', isActive: { $ne: false } });
+        if (room) directRooms.push(room);
     }
-    return null;
+    if (directRooms.length === 0) return null;
+
+    directRooms.sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
+    const canonical = directRooms[0];
+
+    const pairKey = [String(userIdA), String(userIdB)].sort().join(':');
+    if (!canonical.metadata || canonical.metadata.get('directPair') !== pairKey) {
+        canonical.metadata = canonical.metadata || new Map();
+        canonical.metadata.set('directPair', pairKey);
+        await canonical.save();
+    }
+    return canonical._id;
 }
 
 function assertDirectMessagingAllowed(role, targetUser) {
@@ -60,11 +77,27 @@ async function resolveDirectChatRoomId(req, peerUserId) {
     }
     assertDirectMessagingAllowed(role, targetUser);
 
-    const room = await ChatRoom.create({
-        companyId,
-        roomType: 'DIRECT',
-        isGroup: false
-    });
+    const pairKey = [String(_id), String(peerUserId)].sort().join(':');
+    let room;
+    try {
+        room = await ChatRoom.create({
+            companyId,
+            roomType: 'DIRECT',
+            isGroup: false,
+            metadata: { directPair: pairKey }
+        });
+    } catch (createErr) {
+        if (createErr?.code === 11000) {
+            const existingByPair = await ChatRoom.findOne({
+                companyId,
+                roomType: 'DIRECT',
+                isActive: { $ne: false },
+                'metadata.directPair': pairKey
+            }).select('_id');
+            if (existingByPair?._id) return existingByPair._id;
+        }
+        throw createErr;
+    }
     await ChatParticipant.create([
         { roomId: room._id, userId: _id, companyId, roleAtJoining: role },
         { roomId: room._id, userId: peerUserId, companyId, roleAtJoining: targetUser.role }
@@ -72,12 +105,133 @@ async function resolveDirectChatRoomId(req, peerUserId) {
     return room._id;
 }
 
+async function getPmScopedData(companyId, pmUserId) {
+    const pmProjects = await Project.find({
+        companyId,
+        $or: [{ pmId: pmUserId }, { createdBy: pmUserId }]
+    }).select('_id');
+    const projectIds = pmProjects.map((p) => p._id);
+    const projectIdSet = new Set(projectIds.map((id) => id.toString()));
+
+    if (projectIds.length === 0) {
+        return { projectIds, projectIdSet, userIdSet: new Set() };
+    }
+
+    const [taskAssignedUsers, jobAssignments] = await Promise.all([
+        Task.find({
+            companyId,
+            projectId: { $in: projectIds },
+            assignedBy: pmUserId
+        }).select('assignedTo'),
+        Job.find({
+            companyId,
+            projectId: { $in: projectIds },
+            createdBy: pmUserId
+        }).select('foremanId assignedWorkers')
+    ]);
+
+    const userIdSet = new Set();
+    taskAssignedUsers.forEach((task) => {
+        (task.assignedTo || []).forEach((uid) => {
+            if (uid) userIdSet.add(uid.toString());
+        });
+    });
+    jobAssignments.forEach((job) => {
+        if (job.foremanId) userIdSet.add(job.foremanId.toString());
+        (job.assignedWorkers || []).forEach((uid) => {
+            if (uid) userIdSet.add(uid.toString());
+        });
+    });
+
+    return { projectIds, projectIdSet, userIdSet };
+}
+
+async function getUserChatScope(reqUser) {
+    const companyId = reqUser.companyId;
+    const userId = String(reqUser._id);
+    const role = reqUser.role;
+    const isAdmin = ADMIN_ROLES.includes(role);
+
+    if (isAdmin) {
+        const projects = await Project.find({ companyId }).select('_id');
+        const users = await User.find({ companyId, _id: { $ne: reqUser._id }, isActive: true }).select('_id');
+        return {
+            isAdmin,
+            hideInternal: false,
+            projectIdSet: new Set(projects.map((p) => String(p._id))),
+            directUserIdSet: new Set(users.map((u) => String(u._id)))
+        };
+    }
+
+    if (role === 'PM') {
+        const pmData = await getPmScopedData(companyId, reqUser._id);
+        return {
+            isAdmin: false,
+            hideInternal: true,
+            projectIdSet: pmData.projectIdSet,
+            directUserIdSet: pmData.userIdSet
+        };
+    }
+
+    const assignedProjectIds = new Set();
+    const [ownedProjects, taskProjects, jobProjects] = await Promise.all([
+        Project.find({ companyId, $or: [{ createdBy: reqUser._id }, { pmId: reqUser._id }, { clientId: reqUser._id }] }).select('_id'),
+        Task.find({ companyId, assignedTo: reqUser._id }).select('projectId'),
+        Job.find({
+            companyId,
+            $or: [{ foremanId: reqUser._id }, { assignedWorkers: reqUser._id }, { subcontractorId: reqUser._id }, { createdBy: reqUser._id }]
+        }).select('projectId')
+    ]);
+    ownedProjects.forEach((p) => p?._id && assignedProjectIds.add(String(p._id)));
+    taskProjects.forEach((t) => t?.projectId && assignedProjectIds.add(String(t.projectId)));
+    jobProjects.forEach((j) => j?.projectId && assignedProjectIds.add(String(j.projectId)));
+
+    let directUsersQuery = { companyId, _id: { $ne: reqUser._id }, isActive: true };
+    if (['FOREMAN', 'WORKER'].includes(role)) {
+        directUsersQuery = { ...directUsersQuery, role: { $in: INTERNAL_ROLES } };
+    } else if (['CLIENT', 'SUBCONTRACTOR'].includes(role)) {
+        directUsersQuery = { ...directUsersQuery, role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM'] } };
+    }
+    const directUsers = await User.find(directUsersQuery).select('_id');
+
+    return {
+        isAdmin: false,
+        hideInternal: false,
+        projectIdSet: assignedProjectIds,
+        directUserIdSet: new Set(directUsers.map((u) => String(u._id)))
+    };
+}
+
+async function canUserAccessRoom(room, reqUser, scope) {
+    if (!room) return false;
+    const userId = String(reqUser._id);
+    const role = reqUser.role;
+
+    if (scope.isAdmin) return true;
+
+    if (room.roomType === 'INTERNAL') return !scope.hideInternal && INTERNAL_ROLES.includes(role);
+
+    if (room.roomType === 'PROJECT_GROUP') {
+        const pid = room.projectId ? String(room.projectId) : null;
+        return !!pid && scope.projectIdSet.has(pid);
+    }
+
+    if (room.roomType === 'DIRECT') {
+        const participants = await ChatParticipant.find({ roomId: room._id }).select('userId');
+        const other = participants.find((p) => String(p.userId) !== userId);
+        return !!other && scope.directUserIdSet.has(String(other.userId));
+    }
+
+    return false;
+}
+
 // @desc    Get chat rooms for the current user
 // @route   GET /api/chat
 // @access  Private
 const getChatRooms = async (req, res, next) => {
     try {
-        const { _id, role } = req.user;
+        const { _id } = req.user;
+        const scope = await getUserChatScope(req.user);
 
         // Fetch rooms where user is a participant
         const participants = await ChatParticipant.find({ userId: _id })
@@ -155,13 +309,20 @@ const getChatRooms = async (req, res, next) => {
             };
         }));
 
-        const sortedRooms = rooms
+        let sortedRooms = rooms
             .filter(r => r !== null)
             .sort((a, b) => {
                 const timeA = a.lastMessage ? new Date(a.lastMessage.time) : new Date(0);
                 const timeB = b.lastMessage ? new Date(b.lastMessage.time) : new Date(0);
                 return timeB - timeA;
             });
+
+        sortedRooms = sortedRooms.filter((room) => {
+            if (room.roomType === 'INTERNAL' && scope.hideInternal) return false;
+            if (room.roomType === 'PROJECT_GROUP') return room.projectId && scope.projectIdSet.has(String(room.projectId));
+            if (room.roomType === 'DIRECT') return room.otherUserId && scope.directUserIdSet.has(String(room.otherUserId));
+            return scope.isAdmin;
+        });
 
         res.json(sortedRooms);
     } catch (error) {
@@ -176,6 +337,7 @@ const getRoomMessages = async (req, res, next) => {
     try {
         let { roomId } = req.params;
         const { _id, companyId, role } = req.user;
+        const scope = await getUserChatScope(req.user);
 
         if (!mongoose.Types.ObjectId.isValid(roomId)) {
             res.status(400);
@@ -209,45 +371,7 @@ const getRoomMessages = async (req, res, next) => {
             let shouldJoin = false;
 
             if (room) {
-                if (room.roomType === 'DIRECT') {
-                    const otherExists = await ChatParticipant.findOne({ roomId, userId: { $ne: _id } });
-                    if (otherExists) shouldJoin = true;
-                }
-
-                if (room.roomType === 'PROJECT_GROUP' && room.projectId) {
-                    const project = await Project.findById(room.projectId);
-                    if (project) {
-                        const isAdmin = ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'].includes(role);
-                        const isPM = project.pmId?.toString() === _id.toString() || role === 'PM';
-                        const isClient = project.clientId?.toString() === _id.toString();
-                        const isCreator = project.createdBy?.toString() === _id.toString();
-
-                        if (isAdmin || isPM || isClient || isCreator) {
-                            shouldJoin = true;
-                        } else {
-                            const [Task, Job] = [require('../models/Task'), require('../models/Job')];
-                            const taskAssigned = await Task.exists({ projectId: room.projectId, assignedTo: _id });
-                            if (taskAssigned) {
-                                shouldJoin = true;
-                            } else {
-                                const jobAssigned = await Job.exists({
-                                    projectId: room.projectId,
-                                    $or: [{ foremanId: _id }, { assignedWorkers: _id }, { subcontractorId: _id }]
-                                });
-                                if (jobAssigned) shouldJoin = true;
-                            }
-                        }
-                    }
-                }
-
-                const internalRoles = ['COMPANY_OWNER', 'PM', 'FOREMAN', 'WORKER', 'SUPER_ADMIN', 'ADMIN'];
-                if (room.roomType === 'INTERNAL' && internalRoles.includes(role)) {
-                    shouldJoin = true;
-                }
-
-                if (!shouldJoin && room.createdBy?.toString() === _id.toString()) {
-                    shouldJoin = true;
-                }
+                shouldJoin = await canUserAccessRoom(room, req.user, scope);
 
                 if (shouldJoin) {
                     try {
@@ -285,6 +409,7 @@ const sendMessage = async (req, res, next) => {
     try {
         let { roomId, message, attachments, projectId, receiverId } = req.body;
         const { _id, companyId, role } = req.user;
+        const scope = await getUserChatScope(req.user);
 
         // 1. SMART RESOLUTION (Project -> Room)
         if (roomId && !projectId && mongoose.Types.ObjectId.isValid(roomId)) {
@@ -310,33 +435,8 @@ const sendMessage = async (req, res, next) => {
 
         // Resolve or Create Direct Room
         if (targetUserId && mongoose.Types.ObjectId.isValid(targetUserId)) {
-            const existingParticipants = await ChatParticipant.aggregate([
-                { $match: { userId: { $in: [new mongoose.Types.ObjectId(_id), new mongoose.Types.ObjectId(targetUserId)] } } },
-                { $group: { _id: "$roomId", count: { $sum: 1 } } },
-                { $match: { count: 2 } }
-            ]);
-
-            let directRoom = null;
-            if (existingParticipants.length > 0) {
-                for (const ep of existingParticipants) {
-                    directRoom = await ChatRoom.findOne({ _id: ep._id, roomType: 'DIRECT' });
-                    if (directRoom) break;
-                }
-            }
-
-            if (!directRoom) {
-                // Check if internal roles can message each other
-                const targetUser = await User.findById(targetUserId);
-                if (targetUser) {
-                    directRoom = await ChatRoom.create({ companyId, roomType: 'DIRECT', isGroup: false });
-                    await ChatParticipant.create([
-                        { roomId: directRoom._id, userId: _id, companyId, roleAtJoining: role },
-                        { roomId: directRoom._id, userId: targetUserId, companyId, roleAtJoining: targetUser.role }
-                    ]);
-                }
-            }
-
-            if (directRoom) actualRoomId = directRoom._id;
+            const resolvedDirectRoomId = await resolveDirectChatRoomId(req, targetUserId);
+            if (resolvedDirectRoomId) actualRoomId = resolvedDirectRoomId;
         }
 
         if (!actualRoomId || !mongoose.Types.ObjectId.isValid(actualRoomId)) {
@@ -373,7 +473,8 @@ const sendMessage = async (req, res, next) => {
         // A. Check explicit participation first (fastest path)
         let participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
         if (participant) {
-            isAuthorized = true;
+            const joinedRoom = await ChatRoom.findById(actualRoomId);
+            isAuthorized = await canUserAccessRoom(joinedRoom, req.user, scope);
         }
 
         // B. If not a participant yet, attempt smart auto-join based on room type
@@ -381,64 +482,7 @@ const sendMessage = async (req, res, next) => {
             const room = await ChatRoom.findById(actualRoomId);
 
             if (room) {
-                // --- DIRECT ROOMS ---
-                // If user was supposed to be in a direct room but participant record is missing,
-                // re-add them. This handles edge cases where records were lost or not created.
-                if (room.roomType === 'DIRECT') {
-                    // For direct rooms, check if any other participant exists
-                    const otherParticipant = await ChatParticipant.findOne({
-                        roomId: actualRoomId,
-                        userId: { $ne: _id }
-                    });
-                    // If room has another participant, this user should also be in it
-                    if (otherParticipant) {
-                        isAuthorized = true;
-                    }
-                }
-
-                // --- PROJECT GROUP ROOMS ---
-                if (room.roomType === 'PROJECT_GROUP' && room.projectId) {
-                    const project = await Project.findById(room.projectId);
-                    if (project) {
-                        const isAdmin = ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'].includes(role);
-                        const isPM = project.pmId?.toString() === _id.toString() || role === 'PM';
-                        const isClient = project.clientId?.toString() === _id.toString();
-                        const isCreator = project.createdBy?.toString() === _id.toString();
-
-                        if (isAdmin || isPM || isClient || isCreator) {
-                            isAuthorized = true;
-                        } else {
-                            // Check via tasks, jobs, or subcontractor assignment
-                            const [Task, Job] = [require('../models/Task'), require('../models/Job')];
-                            const taskAssigned = await Task.exists({ projectId: room.projectId, assignedTo: _id });
-                            if (taskAssigned) {
-                                isAuthorized = true;
-                            } else {
-                                const jobAssigned = await Job.exists({
-                                    projectId: room.projectId,
-                                    $or: [
-                                        { foremanId: _id },
-                                        { assignedWorkers: _id },
-                                        { subcontractorId: _id }
-                                    ]
-                                });
-                                if (jobAssigned) isAuthorized = true;
-                            }
-                        }
-                    }
-                }
-
-                // --- INTERNAL COMPANY ROOMS ---
-                const internalRoles = ['COMPANY_OWNER', 'PM', 'FOREMAN', 'WORKER', 'SUPER_ADMIN', 'ADMIN'];
-                if (room.roomType === 'INTERNAL' && internalRoles.includes(role)) {
-                    isAuthorized = true;
-                }
-
-                // --- GENERIC ROOMS (custom groups, etc.) ---
-                // If the user created the room, they should be authorized
-                if (!isAuthorized && room.createdBy?.toString() === _id.toString()) {
-                    isAuthorized = true;
-                }
+                isAuthorized = await canUserAccessRoom(room, req.user, scope);
 
                 // AUTO-JOIN: If authorized but not a participant, create the record now
                 if (isAuthorized && !participant) {
@@ -580,10 +624,16 @@ const getOrCreateDirectRoom = async (req, res, next) => {
     try {
         const { targetUserId } = req.body;
         const { _id } = req.user;
+        const scope = await getUserChatScope(req.user);
 
         if (!targetUserId || !mongoose.Types.ObjectId.isValid(targetUserId)) {
             res.status(400);
             return next(new Error('Valid target user ID is required'));
+        }
+
+        if (!scope.isAdmin && !scope.directUserIdSet.has(String(targetUserId))) {
+            res.status(403);
+            return next(new Error('You are not allowed to chat with this user'));
         }
 
         const existingId = await findExistingDirectRoomId(_id, targetUserId);
@@ -644,8 +694,13 @@ const getChatUsers = async (req, res, next) => {
             // Admins can see everyone
             roleFilter = {};
         } else if (role === 'PM') {
-            // PMs can message anyone in the company (including clients)
-            roleFilter = {};
+            const { directUserIdSet } = await getUserChatScope(req.user);
+            const userIdSet = directUserIdSet;
+            const scopedUserIds = [...userIdSet].map((id) => new mongoose.Types.ObjectId(id));
+            if (scopedUserIds.length === 0) {
+                return res.json([]);
+            }
+            roleFilter = { _id: { $in: scopedUserIds } };
         } else if (['FOREMAN', 'WORKER'].includes(role)) {
             // Foreman/Worker only see internal
             roleFilter = { role: { $in: internalRoles } };

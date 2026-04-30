@@ -5,9 +5,10 @@ const Notification = require('../models/Notification');
 // @access  Private
 const getNotifications = async (req, res, next) => {
     try {
-        const notifications = await Notification.find({ userId: req.user._id })
+        const notifications = await Notification.find({ userId: req.user._id, companyId: req.user.companyId })
             .sort({ createdAt: -1 })
-            .limit(50);
+            .limit(100)
+            .lean();
         res.json(notifications);
     } catch (error) {
         next(error);
@@ -20,10 +21,14 @@ const getNotifications = async (req, res, next) => {
 const markAsRead = async (req, res, next) => {
     try {
         const notification = await Notification.findOneAndUpdate(
-            { _id: req.params.id, userId: req.user._id },
+            { _id: req.params.id, userId: req.user._id, companyId: req.user.companyId },
             { isRead: true },
             { new: true }
         );
+        if (!notification) {
+            res.status(404);
+            throw new Error('Notification not found');
+        }
         res.json(notification);
     } catch (error) {
         next(error);
@@ -35,11 +40,11 @@ const markAsRead = async (req, res, next) => {
 // @access  Private
 const markAllRead = async (req, res, next) => {
     try {
-        await Notification.updateMany(
-            { userId: req.user._id, isRead: false },
+        const result = await Notification.updateMany(
+            { userId: req.user._id, companyId: req.user.companyId, isRead: false },
             { isRead: true }
         );
-        res.json({ message: 'All notifications marked as read' });
+        res.json({ message: 'All notifications marked as read', updatedCount: result.modifiedCount || 0 });
     } catch (error) {
         next(error);
     }

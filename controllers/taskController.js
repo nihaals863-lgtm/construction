@@ -54,6 +54,28 @@ const createSubTasksRecursive = async (taskId, onModel, steps, companyId, create
     return count;
 };
 
+const buildPathFromParent = (parentPath, taskId) => {
+    const base = parentPath && parentPath.trim() ? parentPath : '';
+    return `${base}/${taskId}`.replace(/\/+/g, '/');
+};
+
+const refreshTaskSubtree = async ({ rootTaskId, companyId, session = null }) => {
+    const root = await Task.findOne({ _id: rootTaskId, companyId }).session(session);
+    if (!root) return;
+
+    const queue = [root];
+    while (queue.length > 0) {
+        const current = queue.shift();
+        const children = await Task.find({ parentTaskId: current._id, companyId }).session(session);
+        for (const child of children) {
+            child.level = Number(current.level || 0) + 1;
+            child.path = buildPathFromParent(current.path, child._id.toString());
+            await child.save(session ? { session } : {});
+            queue.push(child);
+        }
+    }
+};
+
 // @desc    Get tasks (role-based)
 // @route   GET /api/tasks
 // @access  Private
@@ -471,9 +493,29 @@ const getProjectTasks = async (req, res, next) => {
 // @access  Private (Admin, PM, Foreman)
 const createTask = async (req, res, next) => {
     try {
-        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate, subTasksList, category } = req.body;
+        const { title, description, projectId, assignedTo, assignedRoleType, priority, status, dueDate, startDate, subTasksList, category, parentTaskId, isChild } = req.body;
 
-        if (!projectId) {
+        let finalProjectId = projectId;
+        let parentTask = null;
+        let level = 0;
+        let path = '';
+        const normalizedParentTaskId = parentTaskId ? String(parentTaskId).trim() : '';
+
+        if (isChild && !normalizedParentTaskId) {
+            return res.status(400).json({ message: 'Child task requires a valid parentTaskId.' });
+        }
+
+        if (normalizedParentTaskId) {
+            parentTask = await Task.findOne({ _id: normalizedParentTaskId, companyId: req.user.companyId });
+            if (!parentTask) {
+                return res.status(404).json({ message: 'Parent task not found' });
+            }
+            finalProjectId = parentTask.projectId;
+            level = Number(parentTask.level || 0) + 1;
+            path = parentTask.path || '';
+        }
+
+        if (!finalProjectId) {
             res.status(400);
             throw new Error('projectId is required');
         }
@@ -503,7 +545,10 @@ const createTask = async (req, res, next) => {
 
         const task = await Task.create({
             companyId: req.user.companyId,
-            projectId,
+            projectId: finalProjectId,
+            parentTaskId: normalizedParentTaskId || null,
+            level,
+            path,
             title,
             category: category || 'TASK',
             description: description || '',
@@ -517,6 +562,9 @@ const createTask = async (req, res, next) => {
             createdBy: req.user._id,
             statusHistory: [{ status: status || 'todo', changedBy: req.user._id }]
         });
+
+        task.path = buildPathFromParent(path, task._id.toString());
+        await task.save();
 
         // Notify each assigned user
         for (const uid of assignedToArr) {
@@ -535,13 +583,13 @@ const createTask = async (req, res, next) => {
             action: 'TASK_CREATED',
             module: 'TASKS',
             details: `Created task "${title}"`,
-            metadata: { taskId: task._id, projectId, assignedTo: assignedToArr }
+            metadata: { taskId: task._id, projectId: finalProjectId, assignedTo: assignedToArr }
         });
 
         // Sync Chat Participants
         try {
             const { syncProjectParticipants } = require('./chatController');
-            await syncProjectParticipants(projectId);
+            await syncProjectParticipants(finalProjectId);
         } catch (syncError) {
             console.error('Task Create: Failed to sync chat participants:', syncError);
         }
@@ -715,17 +763,47 @@ const updateTask = async (req, res, next) => {
         const oldStatus = task.status;
         const oldStartDate = task.startDate;
         const oldDueDate = task.dueDate;
+        const oldParentTaskId = String(task.parentTaskId || '');
 
         const updates = { ...req.body };
         if (updates.assignedTo === "") updates.assignedTo = [];
 
         Object.assign(task, updates);
+        let hierarchyMoved = false;
+
+        if (modelType === 'Task' && updates.parentTaskId !== undefined && String(updates.parentTaskId || '') !== oldParentTaskId) {
+            if (updates.parentTaskId && String(updates.parentTaskId) === String(task._id)) {
+                return res.status(400).json({ message: 'Task cannot be its own parent' });
+            }
+            if (updates.parentTaskId) {
+                const nextParent = await Task.findOne({ _id: updates.parentTaskId, companyId });
+                if (!nextParent) {
+                    return res.status(404).json({ message: 'New parent task not found' });
+                }
+                if (nextParent.path && nextParent.path.includes(`/${task._id.toString()}`)) {
+                    return res.status(400).json({ message: 'Cannot move task under one of its descendants' });
+                }
+                task.parentTaskId = nextParent._id;
+                task.projectId = nextParent.projectId;
+                task.level = Number(nextParent.level || 0) + 1;
+                task.path = buildPathFromParent(nextParent.path, task._id.toString());
+            } else {
+                task.parentTaskId = null;
+                task.level = 0;
+                task.path = buildPathFromParent('', task._id.toString());
+            }
+            hierarchyMoved = true;
+        }
         // Re-resolve assignedTo as array
         if (updates.assignedTo && !Array.isArray(updates.assignedTo)) {
             task.assignedTo = [updates.assignedTo].filter(Boolean);
         }
 
         await task.save();
+
+        if (modelType === 'Task' && hierarchyMoved) {
+            await refreshTaskSubtree({ rootTaskId: task._id, companyId });
+        }
 
         // --- Post-Update Logic ---
         if (modelType === 'JobTask') {
@@ -821,7 +899,31 @@ const deleteTask = async (req, res, next) => {
             throw new Error('Task not found');
         }
 
-        await Task.findByIdAndDelete(req.params.id);
+        const action = req.query.action; // cascade | moveUpward
+        if (action === 'moveUpward') {
+            const children = await Task.find({ parentTaskId: task._id, companyId: req.user.companyId });
+            const newParent = task.parentTaskId
+                ? await Task.findOne({ _id: task.parentTaskId, companyId: req.user.companyId })
+                : null;
+            for (const child of children) {
+                child.parentTaskId = task.parentTaskId || null;
+                child.level = task.parentTaskId ? Number(task.level || 0) : 0;
+                child.path = buildPathFromParent(newParent?.path || '', child._id.toString());
+                await child.save();
+                await refreshTaskSubtree({ rootTaskId: child._id, companyId: req.user.companyId });
+            }
+            await Task.findByIdAndDelete(req.params.id);
+        } else {
+            const escaped = String(task.path || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (escaped) {
+                await Task.deleteMany({
+                    companyId: req.user.companyId,
+                    path: { $regex: new RegExp(`^${escaped}(/|$)`) }
+                });
+            } else {
+                await Task.findByIdAndDelete(req.params.id);
+            }
+        }
 
         await AuditLog.create({
             userId: req.user._id,
