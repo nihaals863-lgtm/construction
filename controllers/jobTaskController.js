@@ -211,9 +211,17 @@ const updateJobTask = async (req, res) => {
             if (status) task.status = status;
             if (cancellationReason) task.cancellationReason = cancellationReason;
         } else {
-            // Admin/PM/Foreman can update anything
+            // Admin/PM/Foreman/Subcontractor can update anything
             const updates = { ...req.body };
             
+            // Validate hierarchy if changing assignee
+            if (updates.assignedTo) {
+                const hierarchyError = await validateAssignmentHierarchy(req.user.role, updates.assignedTo);
+                if (hierarchyError) {
+                    return res.status(403).json({ message: hierarchyError });
+                }
+            }
+
             // Normalize status and priority if they exist in body
             if (updates.status === 'todo') updates.status = 'pending';
             if (updates.priority) updates.priority = updates.priority.toLowerCase();

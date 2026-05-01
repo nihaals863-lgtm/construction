@@ -10,39 +10,48 @@ const getPhotos = async (req, res, next) => {
     try {
         const query = { companyId: req.user.companyId };
 
-        // PM / Foreman / Worker Visibility Logic
-        if (['PM', 'FOREMAN', 'WORKER'].includes(req.user.role)) {
-            const jobFilter = { companyId: req.user.companyId };
-
-            if (req.user.role === 'PM') {
-                jobFilter.$or = [
-                    { foremanId: req.user._id },
-                    { createdBy: req.user._id }
-                ];
-            } else if (req.user.role === 'FOREMAN') {
-                jobFilter.foremanId = req.user._id;
-            } else {
-                jobFilter.assignedWorkers = req.user._id;
-            }
-
-            const assignedJobs = await Job.find(jobFilter).select('projectId').lean();
-            const jobProjectIds = assignedJobs
-                .filter(j => j.projectId)
-                .map(j => j.projectId.toString());
-
-            if (req.user.role === 'PM') {
-                const directProjects = await Project.find({
+        // Role-based Visibility Logic
+        if (['PM', 'FOREMAN', 'WORKER', 'CLIENT'].includes(req.user.role)) {
+            if (req.user.role === 'CLIENT') {
+                const clientProjects = await Project.find({
                     companyId: req.user.companyId,
-                    $or: [
-                        { pmId: req.user._id },
-                        { createdBy: req.user._id }
-                    ]
+                    clientId: req.user._id
                 }).select('_id').lean();
-                const directProjectIds = directProjects.map(p => p._id.toString());
-                const allProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
-                query.projectId = { $in: allProjectIds };
+                const clientProjectIds = clientProjects.map(p => p._id.toString());
+                query.projectId = { $in: clientProjectIds };
             } else {
-                query.projectId = { $in: jobProjectIds };
+                const jobFilter = { companyId: req.user.companyId };
+
+                if (req.user.role === 'PM') {
+                    jobFilter.$or = [
+                        { foremanId: req.user._id },
+                        { createdBy: req.user._id }
+                    ];
+                } else if (req.user.role === 'FOREMAN') {
+                    jobFilter.foremanId = req.user._id;
+                } else {
+                    jobFilter.assignedWorkers = req.user._id;
+                }
+
+                const assignedJobs = await Job.find(jobFilter).select('projectId').lean();
+                const jobProjectIds = assignedJobs
+                    .filter(j => j.projectId)
+                    .map(j => j.projectId.toString());
+
+                if (req.user.role === 'PM') {
+                    const directProjects = await Project.find({
+                        companyId: req.user.companyId,
+                        $or: [
+                            { pmId: req.user._id },
+                            { createdBy: req.user._id }
+                        ]
+                    }).select('_id').lean();
+                    const directProjectIds = directProjects.map(p => p._id.toString());
+                    const allProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
+                    query.projectId = { $in: allProjectIds };
+                } else {
+                    query.projectId = { $in: jobProjectIds };
+                }
             }
         }
 

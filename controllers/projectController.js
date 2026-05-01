@@ -57,7 +57,7 @@ const getProjects = async (req, res, next) => {
         // We exclude 'image' if it's too large, but since we migrated to Cloudinary, 
         // we'll keep it but ensure old Base64 data doesn't bloat the response.
         const projects = await Project.find(query)
-            .select('name status pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image')
+            .select('name status pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image startDate endDate')
             .populate('clientId', 'fullName email')
             .populate('pmId', 'fullName email')
             .sort({ createdAt: -1 })

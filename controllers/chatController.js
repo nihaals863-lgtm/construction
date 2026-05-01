@@ -164,12 +164,28 @@ async function getUserChatScope(reqUser) {
     }
 
     if (role === 'PM') {
-        const pmData = await getPmScopedData(companyId, reqUser._id);
+        const pmProjects = await Project.find({ 
+            companyId, 
+            $or: [{ pmId: reqUser._id }, { createdBy: reqUser._id }] 
+        }).select('_id clientId');
+        
+        const assignedClientIds = pmProjects.map(p => String(p.clientId)).filter(id => id && id !== 'undefined');
+        const assignedProjectIds = pmProjects.map(p => String(p._id));
+
+        const scopeUsers = await User.find({ 
+            companyId, 
+            isActive: true, 
+            $or: [
+                { role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'] } },
+                { _id: { $in: assignedClientIds } }
+            ]
+        }).select('_id');
+        
         return {
             isAdmin: false,
-            hideInternal: true,
-            projectIdSet: pmData.projectIdSet,
-            directUserIdSet: pmData.userIdSet
+            hideInternal: false,
+            projectIdSet: new Set(assignedProjectIds),
+            directUserIdSet: new Set(scopeUsers.map((u) => String(u._id)))
         };
     }
 
@@ -189,8 +205,24 @@ async function getUserChatScope(reqUser) {
     let directUsersQuery = { companyId, _id: { $ne: reqUser._id }, isActive: true };
     if (['FOREMAN', 'WORKER'].includes(role)) {
         directUsersQuery = { ...directUsersQuery, role: { $in: INTERNAL_ROLES } };
-    } else if (['CLIENT', 'SUBCONTRACTOR'].includes(role)) {
+    } else if (role === 'SUBCONTRACTOR') {
         directUsersQuery = { ...directUsersQuery, role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM'] } };
+    } else if (role === 'CLIENT') {
+        // Client only sees Admins + PMs assigned to their projects
+        const clientProjects = await Project.find({ companyId, clientId: reqUser._id }).select('pmId createdBy');
+        const allowedPMIds = new Set();
+        clientProjects.forEach(p => {
+            if (p.pmId) allowedPMIds.add(String(p.pmId));
+            if (p.createdBy) allowedPMIds.add(String(p.createdBy));
+        });
+
+        directUsersQuery = { 
+            ...directUsersQuery, 
+            $or: [
+                { role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'] } },
+                { _id: { $in: Array.from(allowedPMIds) } }
+            ]
+        };
     }
     const directUsers = await User.find(directUsersQuery).select('_id');
 
@@ -230,7 +262,7 @@ async function canUserAccessRoom(room, reqUser, scope) {
 // @access  Private
 const getChatRooms = async (req, res, next) => {
     try {
-        const { _id } = req.user;
+        const { _id, role } = req.user;
         const scope = await getUserChatScope(req.user);
 
         // Fetch rooms where user is a participant
@@ -309,19 +341,47 @@ const getChatRooms = async (req, res, next) => {
             };
         }));
 
-        let sortedRooms = rooms
-            .filter(r => r !== null)
-            .sort((a, b) => {
-                const timeA = a.lastMessage ? new Date(a.lastMessage.time) : new Date(0);
-                const timeB = b.lastMessage ? new Date(b.lastMessage.time) : new Date(0);
-                return timeB - timeA;
-            });
-
-        sortedRooms = sortedRooms.filter((room) => {
+        // Filter based on scope (hide unauthorized rooms)
+        let filteredRooms = rooms.filter((room) => {
+            if (!room) return false;
             if (room.roomType === 'INTERNAL' && scope.hideInternal) return false;
             if (room.roomType === 'PROJECT_GROUP') return room.projectId && scope.projectIdSet.has(String(room.projectId));
             if (room.roomType === 'DIRECT') return room.otherUserId && scope.directUserIdSet.has(String(room.otherUserId));
             return scope.isAdmin;
+        });
+
+        // VIRTUAL ROOMS FOR PM: Show all clients even if no active room exists
+        if (role === 'PM') {
+            const accessibleClientIds = Array.from(scope.directUserIdSet);
+            const allClients = await User.find({ 
+                _id: { $in: accessibleClientIds }, 
+                role: 'CLIENT', 
+                isActive: true 
+            }).select('fullName role avatar');
+
+            for (const client of allClients) {
+                const alreadyIn = filteredRooms.some(r => r.roomType === 'DIRECT' && String(r.otherUserId) === String(client._id));
+                if (!alreadyIn) {
+                    filteredRooms.push({
+                        id: client._id, // Using userId as temp roomId
+                        name: client.fullName,
+                        isGroup: false,
+                        roomType: 'DIRECT',
+                        otherRole: 'CLIENT',
+                        otherUserId: client._id,
+                        lastMessage: null,
+                        unreadCount: 0,
+                        avatar: client.avatar,
+                        virtual: true
+                    });
+                }
+            }
+        }
+
+        const sortedRooms = filteredRooms.sort((a, b) => {
+            const timeA = a.lastMessage ? new Date(a.lastMessage.time) : new Date(0);
+            const timeB = b.lastMessage ? new Date(b.lastMessage.time) : new Date(0);
+            return timeB - timeA;
         });
 
         res.json(sortedRooms);
@@ -686,7 +746,7 @@ const getChatUsers = async (req, res, next) => {
     try {
         const { companyId, _id, role } = req.user;
 
-        const admins = ['COMPANY_OWNER', 'SUPER_ADMIN'];
+        const admins = ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'];
         const internalRoles = ['COMPANY_OWNER', 'PM', 'FOREMAN', 'WORKER', 'SUPER_ADMIN'];
         let roleFilter = {};
 
@@ -694,13 +754,10 @@ const getChatUsers = async (req, res, next) => {
             // Admins can see everyone
             roleFilter = {};
         } else if (role === 'PM') {
-            const { directUserIdSet } = await getUserChatScope(req.user);
-            const userIdSet = directUserIdSet;
-            const scopedUserIds = [...userIdSet].map((id) => new mongoose.Types.ObjectId(id));
-            if (scopedUserIds.length === 0) {
-                return res.json([]);
-            }
-            roleFilter = { _id: { $in: scopedUserIds } };
+            // PMs can see all internal staff and subcontractors
+            roleFilter = { 
+                role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'] } 
+            };
         } else if (['FOREMAN', 'WORKER'].includes(role)) {
             // Foreman/Worker only see internal
             roleFilter = { role: { $in: internalRoles } };
