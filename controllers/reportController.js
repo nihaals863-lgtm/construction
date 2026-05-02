@@ -1103,7 +1103,7 @@ const getDetailedProjectReport = async (req, res, next) => {
             Task.find({ projectId, companyId }).populate('assignedTo', 'fullName role').select('title status dueDate assignedTo').lean(),
             RFI.find({ projectId, companyId }).select('subject status dueDate').lean(),
             Issue.find({ projectId, companyId }).populate('assignedTo', 'fullName').populate('reportedBy', 'fullName').select('title status priority assignedTo reportedBy createdAt').sort({ createdAt: -1 }).lean(),
-            DailyLog.find({ projectId, companyId }).populate('reportedBy', 'fullName').select('date reportedBy weather workPerformed notes completed').sort({ date: -1 }).lean()
+            DailyLog.find({ projectId, companyId }).populate('reportedBy', 'fullName').select('date reportedBy weather workPerformed notes completed manpower createdAt').sort({ date: -1 }).lean()
         ]);
 
         const detailedJobs = await Promise.all(jobs.map(async (job) => {

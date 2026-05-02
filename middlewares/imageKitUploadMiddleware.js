@@ -45,6 +45,7 @@ const imageKitUpload = async (req, res, next) => {
         else if (req.baseUrl.includes('vendors')) folder = '/trades';
         else if (req.baseUrl.includes('rfis')) folder = '/rfis';
         else if (req.baseUrl.includes('chat')) folder = '/chat';
+        else if (req.baseUrl.includes('issues')) folder = '/issues';
 
         const uploadPromises = files.map(async (file) => {
             const uploadResponse = await imagekit.upload({

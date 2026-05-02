@@ -18,7 +18,7 @@ router.get('/worker', authorize('WORKER', 'SUBCONTRACTOR', 'FOREMAN', 'PM', 'COM
 router.get('/job/:jobId', getJobTasks);
 
 // CRUD routes
-router.post('/', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM', 'FOREMAN'), createJobTask);
+router.post('/', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM', 'FOREMAN', 'SUBCONTRACTOR'), createJobTask);
 router.patch('/:id', updateJobTask); // Authorization handled inside controller for worker status updates
 router.delete('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), deleteJobTask);
 
