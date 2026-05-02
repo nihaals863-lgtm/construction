@@ -47,24 +47,16 @@ const server = http.createServer(app);
 // Socket.io Setup
 const io = new Server(server, {
     cors: {
-        origin: ["https://kaal.ca", "http://localhost:5173", "http://localhost:3000"],
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-        credentials: true
-    },
-    transports: ['websocket', 'polling']
+        origin: "*" , // Allow all origins for now (adjust for production)
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+    }
 });
 
 // Connect to Database handled at bottom of file
 
 // Middleware
-app.use(helmet({
-    crossOriginResourcePolicy: false,
-    contentSecurityPolicy: false,
-}));
-app.use(cors({
-    origin: ["https://kaal.ca", "http://localhost:5173", "http://localhost:3000"],
-    credentials: true
-}));
+app.use(helmet());
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan('dev'));
@@ -121,7 +113,7 @@ io.use((socket, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        socket.user = decoded; // { userId, role, companyId, ... }
+        socket.user = decoded; // Contains id, role, etc.
         next();
     } catch (err) {
         return next(new Error('Authentication error: Invalid token'));
@@ -130,24 +122,18 @@ io.use((socket, next) => {
 
 // Socket.io Connection
 io.on('connection', async (socket) => {
-    if (!socket.user || !socket.user.userId) {
-        console.log('New client connected without authentication:', socket.id);
-        return;
-    }
-    const userId = socket.user.userId;
-    console.log('New client connected:', socket.id, 'User:', userId);
+    console.log('New client connected:', socket.id, 'User:', socket.user.id);
 
     // Join personal room
-    socket.join(userId.toString());
+    socket.join(socket.user.id);
 
-
-    // Join all chat rooms this user participates in (required for io.to(roomId).emit('new_message'))
+    // Join all chat rooms the user is a participant of
     try {
         const ChatParticipant = require('./models/ChatParticipant');
-        const participants = await ChatParticipant.find({ userId });
+        const participants = await ChatParticipant.find({ userId: socket.user.id });
         participants.forEach(p => {
             socket.join(p.roomId.toString());
-            console.log(`User ${userId} joined room ${p.roomId}`);
+            console.log(`User ${socket.user.id} joined room ${p.roomId}`);
         });
     } catch (err) {
         console.error('Error joining rooms on connect:', err);
@@ -173,9 +159,8 @@ io.on('connection', async (socket) => {
 
     // Handle room joining dynamically (e.g. when a new room is created)
     socket.on('join_room', (roomId) => {
-        if (!roomId) return;
         socket.join(roomId);
-        console.log(`User ${socket.user.userId} joined room manually: ${roomId}`);
+        console.log(`User ${socket.user.id} joined room manually: ${roomId}`);
     });
 
     socket.on('disconnect', () => {

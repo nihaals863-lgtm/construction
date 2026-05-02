@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { clockIn, clockOut, getTimeLogs, updateTimeLog, deleteTimeLog } = require('../controllers/TimeLogController');
+const { clockIn, clockOut, getTimeLogs, updateTimeLog } = require('../controllers/timeLogController');
 const { protect, checkPermission } = require('../middlewares/authMiddleware');
 
 router.use(protect);
@@ -18,8 +18,7 @@ router.post('/clock-out', (req, res, next) => {
     }
     next();
 }, clockOut);
-// updateTimeLog and deleteTimeLog require permission
+// updateTimeLog is used by Crew Control for bulk actions too
 router.patch('/:id', checkPermission('CLOCK_IN_CREW'), updateTimeLog);
-router.delete('/:id', checkPermission('CLOCK_IN_CREW'), deleteTimeLog);
 
 module.exports = router;
