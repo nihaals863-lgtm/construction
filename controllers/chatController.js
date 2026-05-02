@@ -671,6 +671,12 @@ const markAsRead = async (req, res, next) => {
             return next(new Error('Participant record not found'));
         }
 
+        // Notify the user to refresh their sidebar/navbar badges
+        const io = req.app.get('io');
+        if (io) {
+            io.to(_id.toString()).emit('unread_count_updated');
+        }
+
         res.json({ success: true, lastReadAt: participant.lastReadAt });
     } catch (error) {
         next(error);

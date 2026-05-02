@@ -318,9 +318,30 @@ const updateTimeLog = async (req, res, next) => {
     }
 };
 
+// @desc    Delete TimeLog
+// @route   DELETE /api/timelogs/:id
+// @access  Private (PM, COMPANY_OWNER)
+const deleteTimeLog = async (req, res, next) => {
+    try {
+        const log = await TimeLog.findOne({ _id: req.params.id, companyId: req.user.companyId });
+
+        if (!log) {
+            res.status(404);
+            throw new Error('TimeLog not found');
+        }
+
+        await TimeLog.findByIdAndDelete(req.params.id);
+
+        res.json({ message: 'TimeLog removed' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     clockIn,
     clockOut,
     getTimeLogs,
-    updateTimeLog
+    updateTimeLog,
+    deleteTimeLog
 };

@@ -18,7 +18,7 @@ const getProjects = async (req, res, next) => {
             delete query.companyId;
         }
 
-        if (['PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(role)) {
+        if (['FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(role)) {
             
             const jobFilter = { 
                 companyId,
@@ -51,6 +51,11 @@ const getProjects = async (req, res, next) => {
 
         if (role === 'CLIENT') {
             query.clientId = userId;
+        }
+
+        // Exclude archived projects by default
+        if (!req.query.includeArchived) {
+            query.status = { $ne: 'archived' };
         }
 
         // Optimization: Select only necessary fields for the list view. 
@@ -227,10 +232,80 @@ const updateProject = async (req, res, next) => {
     }
 };
 
-// @desc    Delete project
+// @desc    Archive project (Soft delete)
 // @route   DELETE /api/projects/:id
-// @access  Private (COMPANY_OWNER, SUPER_ADMIN)
+// @access  Private (COMPANY_OWNER, PM, SUPER_ADMIN)
 const deleteProject = async (req, res, next) => {
+    try {
+        const project = await Project.findById(req.params.id);
+
+        if (!project) {
+            res.status(404);
+            throw new Error('Project not found');
+        }
+
+        // Multi-tenant authorization check
+        if (req.user.role !== 'SUPER_ADMIN' && req.user.companyId.toString() !== project.companyId.toString()) {
+            res.status(403);
+            throw new Error('Not authorized to archive this project');
+        }
+
+        project.status = 'archived';
+        await project.save();
+        
+        res.json({ message: 'Project moved to archive' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Get archived projects
+// @route   GET /api/projects/archived
+// @access  Private (COMPANY_OWNER, SUPER_ADMIN)
+const getArchivedProjects = async (req, res, next) => {
+    try {
+        const query = { 
+            companyId: req.user.companyId,
+            status: 'archived'
+        };
+
+        const projects = await Project.find(query)
+            .populate('clientId', 'fullName')
+            .populate('pmId', 'fullName')
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        res.json(projects);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Restore archived project
+// @route   PATCH /api/projects/:id/restore
+// @access  Private (COMPANY_OWNER, SUPER_ADMIN)
+const restoreProject = async (req, res, next) => {
+    try {
+        const project = await Project.findOne({ _id: req.params.id, companyId: req.user.companyId });
+
+        if (!project) {
+            res.status(404);
+            throw new Error('Project not found');
+        }
+
+        project.status = 'active'; // Default back to active
+        await project.save();
+
+        res.json({ message: 'Project restored successfully', project });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Permanently delete project
+// @route   DELETE /api/projects/:id/permanent
+// @access  Private (COMPANY_OWNER, SUPER_ADMIN)
+const permanentlyDeleteProject = async (req, res, next) => {
     try {
         const project = await Project.findById(req.params.id);
 
@@ -248,18 +323,16 @@ const deleteProject = async (req, res, next) => {
         const Job = require('../models/Job');
         const JobTask = require('../models/JobTask');
         const TimeLog = require('../models/TimeLog');
-
-        // Find jobs under this project
-        const jobs = await Job.find({ projectId: project._id });
-        const jobIds = jobs.map(j => j._id);
+        const ChatRoom = require('../models/ChatRoom');
 
         // Delete dependencies
         await TimeLog.deleteMany({ projectId: project._id });
-        await JobTask.deleteMany({ jobId: { $in: jobIds } });
+        await JobTask.deleteMany({ jobId: { $in: await Job.find({ projectId: project._id }).distinct('_id') } });
         await Job.deleteMany({ projectId: project._id });
+        await ChatRoom.deleteMany({ projectId: project._id });
 
         await Project.findByIdAndDelete(req.params.id);
-        res.json({ message: 'Project removed' });
+        res.json({ message: 'Project permanently removed' });
     } catch (error) {
         next(error);
     }
@@ -285,17 +358,31 @@ const getProjectMembers = async (req, res, next) => {
 
         // Find all users assigned to tasks in this project
         const tasks = await Task.find({ projectId: req.params.id }).select('assignedTo');
-        const assignedUserIds = [...new Set(tasks.flatMap(t => t.assignedTo.map(id => id.toString())))];
+        const assignedUserIds = new Set();
+        
+        tasks.forEach(t => {
+            if (t.assignedTo) {
+                t.assignedTo.forEach(id => assignedUserIds.add(id.toString()));
+            }
+        });
 
-        // Include project creator and company owners/PMs might also be relevant
-        // For now, let's get all staff who are assigned to tasks + the creator
-        if (project.createdBy) {
-            assignedUserIds.push(project.createdBy.toString());
-        }
+        // Also check Job-level assignments
+        const Job = require('../models/Job');
+        const jobs = await Job.find({ projectId: req.params.id }).select('foremanId assignedWorkers');
+        jobs.forEach(j => {
+            if (j.foremanId) assignedUserIds.add(j.foremanId.toString());
+            if (j.assignedWorkers) {
+                j.assignedWorkers.forEach(id => assignedUserIds.add(id.toString()));
+            }
+        });
+
+        // Include project creator and assigned PM
+        if (project.createdBy) assignedUserIds.add(project.createdBy.toString());
+        if (project.pmId) assignedUserIds.add(project.pmId.toString());
 
         const members = await User.find({
-            _id: { $in: assignedUserIds },
-            role: { $ne: 'CLIENT' } // Only staff members, client already knows themselves
+            _id: { $in: Array.from(assignedUserIds) },
+            role: { $ne: 'CLIENT' }
         }).select('fullName email role phone status');
 
         res.json(members);
@@ -339,7 +426,7 @@ const getClientProgress = async (req, res, next) => {
 
         // Upcoming Work (Next 5)
         const upcomingWork = tasks
-            .filter(t => t.status === 'pending' || t.status === 'in-progress')
+            .filter((t) => t.status === 'pending' || t.status === 'in_progress' || t.status === 'in-progress')
             .sort((a, b) => (a.dueDate || Infinity) - (b.dueDate || Infinity))
             .slice(0, 5)
             .map(t => t.title);
@@ -492,5 +579,8 @@ module.exports = {
     getClientProgress,
     getProjectClientUpdates,
     createProjectClientUpdate,
-    getProjectFinancialSummary
+    getProjectFinancialSummary,
+    getArchivedProjects,
+    restoreProject,
+    permanentlyDeleteProject
 };

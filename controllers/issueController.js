@@ -5,7 +5,17 @@ const Issue = require('../models/Issue');
 // @access  Private
 const getIssues = async (req, res, next) => {
     try {
-        const query = { companyId: req.user.companyId };
+        const { role, _id: userId, companyId } = req.user;
+        const query = { companyId };
+
+        // Role-based filtering
+        if (['FOREMAN', 'WORKER', 'SUBCONTRACTOR'].includes(role)) {
+            query.$or = [
+                { assignedTo: userId },
+                { reportedBy: userId }
+            ];
+        }
+
         if (req.query.projectId) query.projectId = req.query.projectId;
         if (req.query.jobId) query.jobId = req.query.jobId;
         if (req.query.status) query.status = req.query.status;
@@ -55,22 +65,29 @@ const updateIssue = async (req, res, next) => {
         }
 
         const updates = { ...req.body };
-        if (req.files && req.files.length > 0) {
-            const newImages = req.files.map(file => file.path);
-            // If the front-end sends currentImages as a JSON string or array, we use it
-            let currentImages = [];
-            if (req.body.currentImages) {
-                try {
-                    currentImages = typeof req.body.currentImages === 'string'
-                        ? JSON.parse(req.body.currentImages)
-                        : req.body.currentImages;
-                } catch (e) {
-                    currentImages = issue.images || [];
-                }
-            } else {
-                currentImages = issue.images || [];
+        
+        // Handle images (existing + new)
+        let existingImages = [];
+        if (req.body.images) {
+            try {
+                existingImages = typeof req.body.images === 'string' 
+                    ? JSON.parse(req.body.images) 
+                    : req.body.images;
+            } catch (e) {
+                existingImages = [];
             }
-            updates.images = [...currentImages, ...newImages];
+            delete updates.images; // Remove from updates to avoid conflict
+        } else {
+            // If images field is not present in req.body, it might be a simple status update
+            // so we don't want to clear the images unless explicitly requested.
+            // But for multipart form, we usually send it.
+        }
+
+        const newImages = req.files ? req.files.map(file => file.path) : [];
+        
+        // Only update images if we received the images field OR new files
+        if (req.body.images || newImages.length > 0) {
+            updates.images = [...existingImages, ...newImages];
         }
 
         const updatedIssue = await Issue.findByIdAndUpdate(req.params.id, updates, {
