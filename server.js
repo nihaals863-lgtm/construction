@@ -45,75 +45,32 @@ const app = express();
 const server = http.createServer(app);
 
 // Socket.io Setup
-// const io = new Server(server, {
-//     cors: {
-//         origin: "*" , // Allow all origins for now (adjust for production)
-//         methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
-//     }
-// });
-
-
-
-const allowedOrigins = [
-  "https://kaal.ca",
-  "https://www.kaal.ca"
-];
-
-// ✅ Common CORS config
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow Postman / no-origin requests
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("CORS not allowed: " + origin));
-    }
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  credentials: true
-};
-
-
-// ================= SOCKET.IO =================
 const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    credentials: true
-  }
+    cors: {
+        origin: ["https://kaal.ca", "http://localhost:5173", "http://localhost:3000"],
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+        credentials: true
+    },
+    transports: ['websocket', 'polling']
 });
-
-
-
-
-
-
-
-
-
-
-
 
 // Connect to Database handled at bottom of file
 
 // Middleware
-app.use(helmet());
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-// app.use(cors());
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false,
+}));
+app.use(cors({
+    origin: ["https://kaal.ca", "http://localhost:5173", "http://localhost:3000"],
+    credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan('dev'));
 
 // Static files
-// app.use('/uploads', cors(), express.static(path.join(__dirname, 'uploads')));
-
-app.use('/uploads',
-  cors(corsOptions),
-  express.static(path.join(__dirname, 'uploads'))
-);
+app.use('/uploads', cors(), express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -171,8 +128,14 @@ io.use((socket, next) => {
     }
 });
 
+
+
 // Socket.io Connection
 io.on('connection', async (socket) => {
+    if (!socket.user || !socket.user.userId) {
+        console.log('New client connected without authentication:', socket.id);
+        return;
+    }
     const userId = socket.user.userId;
     console.log('New client connected:', socket.id, 'User:', userId);
 
@@ -212,6 +175,7 @@ io.on('connection', async (socket) => {
 
     // Handle room joining dynamically (e.g. when a new room is created)
     socket.on('join_room', (roomId) => {
+        if (!roomId) return;
         socket.join(roomId);
         console.log(`User ${socket.user.userId} joined room manually: ${roomId}`);
     });
