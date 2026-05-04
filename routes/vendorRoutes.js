@@ -11,16 +11,16 @@ router.post('/public/submit-bid', upload.array('files'), imageKitUpload, vendorC
 router.use(protect);
 
 // Vendor/Trade Management
-router.post('/', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), imageKitUpload, vendorController.createVendor);
+router.post('/', authorize('COMPANY_OWNER', 'PM', 'FOREMAN'), upload.array('files'), imageKitUpload, vendorController.createVendor);
 router.get('/', vendorController.getVendors);
-router.patch('/:id', authorize('COMPANY_OWNER', 'PM'), upload.array('files'), imageKitUpload, vendorController.updateVendor);
-router.delete('/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.deleteVendor);
+router.patch('/:id', authorize('COMPANY_OWNER', 'PM', 'FOREMAN'), upload.array('files'), imageKitUpload, vendorController.updateVendor);
+router.delete('/:id', authorize('COMPANY_OWNER', 'PM', 'FOREMAN'), vendorController.deleteVendor);
 
 // Drawing Distribution
 router.post('/send-drawing', authorize('COMPANY_OWNER', 'PM'), vendorController.sendDrawingToTrades);
 
 // Admin Bidding View
-router.get('/bids', authorize('COMPANY_OWNER', 'PM'), vendorController.getBids);
+router.get('/bids', authorize('COMPANY_OWNER', 'PM', 'FOREMAN'), vendorController.getBids);
 router.patch('/bids/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.updateBidStatus);
 router.delete('/bids/:id', authorize('COMPANY_OWNER', 'PM'), vendorController.deleteBid);
 

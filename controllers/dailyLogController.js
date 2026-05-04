@@ -161,6 +161,7 @@ const getDailyLogReports = async (req, res, next) => {
             const Project = require('../models/Project');
             const pmProjects = await Project.find({
                 $or: [
+                    { pmIds: req.user._id },
                     { pmId: req.user._id },
                     { createdBy: req.user._id }
                 ]

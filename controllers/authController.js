@@ -235,7 +235,11 @@ const getUsers = async (req, res, next) => {
 
         // Support role filtering
         if (req.query.role) {
-            query.role = req.query.role;
+            if (req.query.role.includes(',')) {
+                query.role = { $in: req.query.role.split(',') };
+            } else {
+                query.role = req.query.role;
+            }
         }
 
         console.log('getUsers query:', query);

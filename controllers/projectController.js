@@ -34,7 +34,8 @@ const getProjects = async (req, res, next) => {
                 Project.find({
                     companyId,
                     $or: [
-                        { pmId: userId },
+                        { pmIds: userId },
+                        { pmId: userId }, // Fallback for old data if any
                         { createdBy: userId }
                     ]
                 }).select('_id').lean()
@@ -62,8 +63,9 @@ const getProjects = async (req, res, next) => {
         // We exclude 'image' if it's too large, but since we migrated to Cloudinary, 
         // we'll keep it but ensure old Base64 data doesn't bloat the response.
         const projects = await Project.find(query)
-            .select('name status pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image startDate endDate')
+            .select('name status pmIds pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image startDate endDate')
             .populate('clientId', 'fullName email')
+            .populate('pmIds', 'fullName email')
             .populate('pmId', 'fullName email')
             .sort({ createdAt: -1 })
             .lean();
@@ -82,6 +84,7 @@ const getProjectById = async (req, res, next) => {
         const project = await Project.findById(req.params.id)
             .populate('clientId', 'fullName email avatar')
             .populate('createdBy', 'fullName avatar')
+            .populate('pmIds', 'fullName email avatar')
             .populate('pmId', 'fullName email avatar')
             .lean();
 
@@ -107,7 +110,16 @@ const getProjectById = async (req, res, next) => {
 // @access  Private (PM, COMPANY_OWNER, SUPER_ADMIN)
 const createProject = async (req, res, next) => {
     try {
-        const { name, clientId, startDate, endDate, budget, location, geofenceRadius, image, pmId } = req.body;
+        let { name, clientId, startDate, endDate, budget, location, geofenceRadius, image, pmIds, pmId } = req.body;
+
+        // Parse pmIds if it comes as a string from FormData
+        if (typeof pmIds === 'string') {
+            try {
+                pmIds = JSON.parse(pmIds);
+            } catch (e) {
+                pmIds = pmIds.split(',').filter(id => id.trim());
+            }
+        }
 
         // --- ENFORCE PLAN LIMITS ---
         const companyId = req.user.companyId;
@@ -148,7 +160,8 @@ const createProject = async (req, res, next) => {
             location,
             geofenceRadius,
             image: finalImage,
-            pmId,
+            pmIds: Array.isArray(pmIds) ? pmIds : (pmId ? [pmId] : []),
+            pmId: Array.isArray(pmIds) ? pmIds[0] : pmId, // Keep for backward compatibility if needed
             createdBy: req.user._id
         });
 
@@ -174,6 +187,7 @@ const createProject = async (req, res, next) => {
         const populatedProject = await Project.findById(project._id)
             .populate('clientId', 'fullName email')
             .populate('createdBy', 'fullName')
+            .populate('pmIds', 'fullName email')
             .populate('pmId', 'fullName email');
 
         res.status(201).json(populatedProject);
@@ -209,6 +223,14 @@ const updateProject = async (req, res, next) => {
             }
         });
 
+        if (typeof updateData.pmIds === 'string') {
+            try {
+                updateData.pmIds = JSON.parse(updateData.pmIds);
+            } catch (e) {
+                updateData.pmIds = updateData.pmIds.split(',').filter(id => id.trim());
+            }
+        }
+
         if (req.file) {
             updateData.image = req.file.path;
         }
@@ -216,12 +238,13 @@ const updateProject = async (req, res, next) => {
         const updatedProject = await Project.findByIdAndUpdate(req.params.id, updateData, {
             new: true,
             runValidators: true
-        }).populate('pmId', 'fullName email')
+        }).populate('pmIds', 'fullName email')
+            .populate('pmId', 'fullName email')
             .populate('createdBy', 'fullName')
             .lean();
 
         // Sync chat participants if PM or Client changed
-        if (req.body.pmId || req.body.clientId) {
+        if (req.body.pmIds || req.body.pmId || req.body.clientId) {
             const { syncProjectParticipants } = require('./chatController');
             await syncProjectParticipants(updatedProject._id);
         }
@@ -271,6 +294,7 @@ const getArchivedProjects = async (req, res, next) => {
 
         const projects = await Project.find(query)
             .populate('clientId', 'fullName')
+            .populate('pmIds', 'fullName')
             .populate('pmId', 'fullName')
             .sort({ updatedAt: -1 })
             .lean();
@@ -376,8 +400,11 @@ const getProjectMembers = async (req, res, next) => {
             }
         });
 
-        // Include project creator and assigned PM
+        // Include project creator and assigned PMs
         if (project.createdBy) assignedUserIds.add(project.createdBy.toString());
+        if (project.pmIds && Array.isArray(project.pmIds)) {
+            project.pmIds.forEach(id => assignedUserIds.add(id.toString()));
+        }
         if (project.pmId) assignedUserIds.add(project.pmId.toString());
 
         const members = await User.find({

@@ -42,6 +42,7 @@ const getPhotos = async (req, res, next) => {
                     const directProjects = await Project.find({
                         companyId: req.user.companyId,
                         $or: [
+                            { pmIds: req.user._id },
                             { pmId: req.user._id },
                             { createdBy: req.user._id }
                         ]

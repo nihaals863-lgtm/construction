@@ -31,7 +31,7 @@ const getJobs = async (req, res) => {
         if (role === 'PM') {
             const managedProjects = await Project.find({
                 companyId,
-                $or: [{ pmId: userId }, { createdBy: userId }]
+                $or: [{ pmIds: userId }, { pmId: userId }, { createdBy: userId }]
             }).select('_id').lean();
             
             const projectIds = managedProjects.map(p => p._id);
@@ -59,8 +59,8 @@ const getJobs = async (req, res) => {
             .populate('assignedWorkers', 'fullName role avatar')
             .populate({
                 path: 'projectId',
-                select: 'name pmId',
-                populate: { path: 'pmId', select: 'fullName avatar' }
+                select: 'name pmIds pmId',
+                populate: { path: 'pmIds', select: 'fullName avatar' }
             })
             .sort({ createdAt: -1 })
             .lean();
@@ -79,8 +79,8 @@ const getJobById = async (req, res) => {
             .populate('assignedWorkers', 'fullName role')
             .populate({
                 path: 'projectId',
-                select: 'name pmId',
-                populate: { path: 'pmId', select: 'fullName' }
+                select: 'name pmIds pmId',
+                populate: { path: 'pmIds', select: 'fullName' }
             });
         if (!job) return res.status(404).json({ message: 'Job not found' });
         res.json(job);
@@ -471,7 +471,10 @@ const generateJobHistoryPDF = async (req, res) => {
     try {
         const jobId = req.params.id;
         const job = await Job.findById(jobId)
-            .populate('projectId', 'name')
+            .populate({
+                path: 'projectId',
+                select: 'name pmIds pmId'
+            })
             .populate('foremanId', 'fullName');
 
         if (!job) return res.status(404).json({ message: 'Job not found' });

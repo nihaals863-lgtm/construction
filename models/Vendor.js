@@ -6,6 +6,10 @@ const vendorSchema = new mongoose.Schema({
         ref: 'Company',
         required: true
     },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
     name: {
         type: String,
         required: true,

@@ -288,7 +288,7 @@ const getDashboardStats = async (req, res, next) => {
                 const [directProjects, jobProjects] = await Promise.all([
                     Project.find({
                         companyId,
-                        $or: [{ pmId: userId }, { createdBy: userId }]
+                        $or: [{ pmIds: userId }, { pmId: userId }, { createdBy: userId }]
                     }).select('_id').lean(),
                     Job.find({
                         $or: [{ foremanId: userId }, { createdBy: userId }]
@@ -589,11 +589,14 @@ const getDashboardStats = async (req, res, next) => {
         // Find Top Project
         const topProjectIds = Object.keys(projectProductivity).sort((a, b) => projectProductivity[b] - projectProductivity[a]);
         if (topProjectIds.length > 0) {
-            const topProj = await Project.findById(topProjectIds[0]).populate('pmId', 'fullName').lean();
+            const topProj = await Project.findById(topProjectIds[0]).populate('pmIds pmId', 'fullName').lean();
             if (topProj) {
+                const managers = topProj.pmIds && topProj.pmIds.length > 0 
+                    ? topProj.pmIds.map(m => m.fullName).join(', ') 
+                    : (topProj.pmId?.fullName || 'Unassigned');
                 stats.topProject = {
                     name: topProj.name,
-                    manager: topProj.pmId?.fullName || 'Unassigned',
+                    manager: managers,
                     hours: Math.round(projectProductivity[topProjectIds[0]]),
                     image: topProj.image || 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?q=80&w=200'
                 };

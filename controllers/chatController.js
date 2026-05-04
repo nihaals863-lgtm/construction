@@ -108,7 +108,7 @@ async function resolveDirectChatRoomId(req, peerUserId) {
 async function getPmScopedData(companyId, pmUserId) {
     const pmProjects = await Project.find({
         companyId,
-        $or: [{ pmId: pmUserId }, { createdBy: pmUserId }]
+        $or: [{ pmIds: pmUserId }, { pmId: pmUserId }, { createdBy: pmUserId }]
     }).select('_id');
     const projectIds = pmProjects.map((p) => p._id);
     const projectIdSet = new Set(projectIds.map((id) => id.toString()));
@@ -166,7 +166,7 @@ async function getUserChatScope(reqUser) {
     if (role === 'PM') {
         const pmProjects = await Project.find({ 
             companyId, 
-            $or: [{ pmId: reqUser._id }, { createdBy: reqUser._id }] 
+            $or: [{ pmIds: reqUser._id }, { pmId: reqUser._id }, { createdBy: reqUser._id }] 
         }).select('_id clientId');
         
         const assignedClientIds = pmProjects.map(p => String(p.clientId)).filter(id => id && id !== 'undefined');
@@ -191,7 +191,7 @@ async function getUserChatScope(reqUser) {
 
     const assignedProjectIds = new Set();
     const [ownedProjects, taskProjects, jobProjects] = await Promise.all([
-        Project.find({ companyId, $or: [{ createdBy: reqUser._id }, { pmId: reqUser._id }, { clientId: reqUser._id }] }).select('_id'),
+        Project.find({ companyId, $or: [{ createdBy: reqUser._id }, { pmIds: reqUser._id }, { pmId: reqUser._id }, { clientId: reqUser._id }] }).select('_id'),
         Task.find({ companyId, assignedTo: reqUser._id }).select('projectId'),
         Job.find({
             companyId,
@@ -209,9 +209,12 @@ async function getUserChatScope(reqUser) {
         directUsersQuery = { ...directUsersQuery, role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM'] } };
     } else if (role === 'CLIENT') {
         // Client only sees Admins + PMs assigned to their projects
-        const clientProjects = await Project.find({ companyId, clientId: reqUser._id }).select('pmId createdBy');
+        const clientProjects = await Project.find({ companyId, clientId: reqUser._id }).select('pmIds pmId createdBy');
         const allowedPMIds = new Set();
         clientProjects.forEach(p => {
+            if (p.pmIds && Array.isArray(p.pmIds)) {
+                p.pmIds.forEach(id => allowedPMIds.add(String(id)));
+            }
             if (p.pmId) allowedPMIds.add(String(p.pmId));
             if (p.createdBy) allowedPMIds.add(String(p.createdBy));
         });
@@ -816,6 +819,9 @@ const syncProjectParticipants = async (projectId) => {
 
         // Collect all target user IDs
         const userIds = new Set();
+        if (project.pmIds && Array.isArray(project.pmIds)) {
+            project.pmIds.forEach(id => userIds.add(id.toString()));
+        }
         if (project.pmId) userIds.add(project.pmId.toString());
         if (project.clientId) userIds.add(project.clientId.toString());
         if (project.createdBy) userIds.add(project.createdBy.toString());

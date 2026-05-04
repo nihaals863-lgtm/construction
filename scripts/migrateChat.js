@@ -29,8 +29,11 @@ const migrate = async () => {
                 console.log(`Created group room for project: ${project.name}`);
             }
 
-            // Add Participants (PM and Creator for now)
+            // Add Participants (PMs and Creator for now)
             const members = new Set();
+            if (project.pmIds && Array.isArray(project.pmIds)) {
+                project.pmIds.forEach(id => members.add(id.toString()));
+            }
             if (project.pmId) members.add(project.pmId.toString());
             if (project.createdBy) members.add(project.createdBy.toString());
 

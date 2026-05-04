@@ -61,6 +61,10 @@ const projectSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
+    pmIds: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -82,7 +86,7 @@ const projectSchema = new mongoose.Schema({
 
 // Indexes for quick filtering
 projectSchema.index({ companyId: 1, status: 1 });
-projectSchema.index({ companyId: 1, pmId: 1 });
+projectSchema.index({ companyId: 1, pmIds: 1 });
 projectSchema.index({ companyId: 1, clientId: 1 });
 
 const Project = mongoose.model('Project', projectSchema);

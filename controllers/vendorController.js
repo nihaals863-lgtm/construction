@@ -18,6 +18,7 @@ exports.createVendor = async (req, res) => {
         const vendor = new Vendor({
             ...req.body,
             companyId: req.user.companyId || req.user.company?._id,
+            createdBy: req.user._id,
             attachments
         });
         await vendor.save();
@@ -42,6 +43,11 @@ exports.getVendors = async (req, res) => {
         }
         if (req.query.search) {
             query.name = { $regex: req.query.search, $options: 'i' };
+        }
+
+        // Role-based visibility: Foreman only sees their own trades
+        if (req.user.role === 'FOREMAN') {
+            query.createdBy = req.user._id;
         }
 
         const vendors = await Vendor.find(query)
@@ -154,7 +160,15 @@ exports.submitBid = async (req, res) => {
 exports.getBids = async (req, res) => {
     try {
         const companyId = req.user.companyId;
-        const bids = await TradeBid.find({ companyId })
+        let query = { companyId };
+
+        if (req.user.role === 'FOREMAN') {
+            const myVendors = await Vendor.find({ createdBy: req.user._id }).select('_id');
+            const myVendorIds = myVendors.map(v => v._id);
+            query.vendorId = { $in: myVendorIds };
+        }
+
+        const bids = await TradeBid.find(query)
             .populate('vendorId', 'name email')
             .populate('drawingId', 'title')
             .populate('companyId')
