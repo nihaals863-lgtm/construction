@@ -126,7 +126,7 @@ const createJob = async (req, res) => {
                     userId: job.foremanId,
                     title: 'New Job Assigned',
                     message: `You have been assigned as Foreman for job: "${job.name}"`,
-                    link: '/projects',
+                    link: '/company-admin/projects',
                     type: 'project'
                 });
             }
@@ -137,7 +137,7 @@ const createJob = async (req, res) => {
                     userId: workerId,
                     title: 'New Job Assignment',
                     message: `You have been assigned to job: "${job.name}"`,
-                    link: '/projects',
+                    link: '/company-admin/projects',
                     type: 'project'
                 });
             }
@@ -289,7 +289,7 @@ const updateJob = async (req, res) => {
                     userId: job.foremanId,
                     title: 'Job Updated',
                     message: `Assignments updated for job: "${job.name}"`,
-                    link: '/projects',
+                    link: '/company-admin/projects',
                     type: 'project'
                 });
             }
@@ -300,7 +300,7 @@ const updateJob = async (req, res) => {
                     userId: workerId,
                     title: 'Job Updated',
                     message: `Assignments updated for job: "${job.name}"`,
-                    link: '/projects',
+                    link: '/company-admin/projects',
                     type: 'project'
                 });
             }

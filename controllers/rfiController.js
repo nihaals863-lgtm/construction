@@ -15,6 +15,11 @@ const getRFIs = async (req, res, next) => {
             const projects = await Project.find({ clientId: req.user._id }, '_id');
             const projectIds = projects.map(p => p._id);
             query.projectId = { $in: projectIds };
+
+            // Exclude subcontractor RFIs from client view
+            const User = require('../models/User');
+            const subs = await User.find({ role: 'SUBCONTRACTOR' }, '_id');
+            query.raisedBy = { $nin: subs.map(s => s._id) };
         } else if (req.user.role === 'SUBCONTRACTOR') {
             // Subcontractor: Only assigned RFI or project assigned (depending on exact requirement)
             // User request says "Only assigned RFI (if Sub)"
@@ -22,9 +27,17 @@ const getRFIs = async (req, res, next) => {
                 { raisedBy: req.user._id },
                 { assignedTo: req.user._id }
             ];
-        } else if (req.user.role === 'FOREMAN' || req.user.role === 'PM') {
-            // Foreman/PM: Assigned projects (For now assuming they have access to all project RFIs if they hit the endpoint with a projectId)
-            // If we want strict project assignment, we would need to filter by projects they are assigned to.
+        } else if (req.user.role === 'FOREMAN') {
+            // Foreman: Only RFIs they raised
+            query.raisedBy = req.user._id;
+        } else if (req.user.role === 'PM') {
+            // PM: Assigned projects
+            const Project = require('../models/Project');
+            const projects = await Project.find({ 
+                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
+            }, '_id');
+            const projectIds = projects.map(p => p._id);
+            query.projectId = { $in: projectIds };
         }
 
         if (req.query.projectId) {
@@ -78,11 +91,25 @@ const getRFIStats = async (req, res, next) => {
             const projects = await Project.find({ clientId: req.user._id }, '_id');
             const projectIds = projects.map(p => p._id);
             query.projectId = { $in: projectIds };
+
+            // Exclude subcontractor RFIs from client stats
+            const User = require('../models/User');
+            const subs = await User.find({ role: 'SUBCONTRACTOR' }, '_id');
+            query.raisedBy = { $nin: subs.map(s => s._id) };
         } else if (req.user.role === 'SUBCONTRACTOR') {
             query.$or = [
                 { raisedBy: req.user._id },
                 { assignedTo: req.user._id }
             ];
+        } else if (req.user.role === 'FOREMAN') {
+            query.raisedBy = req.user._id;
+        } else if (req.user.role === 'PM') {
+            const Project = require('../models/Project');
+            const projects = await Project.find({ 
+                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
+            }, '_id');
+            const projectIds = projects.map(p => p._id);
+            query.projectId = { $in: projectIds };
         }
 
         const [total, open, inReview, answered, closed, overdue, highPriority, recent] = await Promise.all([
@@ -94,13 +121,13 @@ const getRFIStats = async (req, res, next) => {
             RFI.countDocuments({ ...query, status: { $ne: 'closed' }, dueDate: { $lt: now } }),
             RFI.find({ ...query, priority: 'high', status: { $ne: 'closed' } })
                 .populate('projectId', 'name')
-                .populate('raisedBy', 'fullName')
+                .populate('raisedBy', 'fullName role')
                 .sort({ createdAt: -1 })
                 .limit(5),
             RFI.find(query)
                 .populate('projectId', 'name')
-                .populate('raisedBy', 'fullName')
-                .populate('assignedTo', 'fullName')
+                .populate('raisedBy', 'fullName role')
+                .populate('assignedTo', 'fullName role')
                 .sort({ createdAt: -1 })
                 .limit(5),
         ]);
@@ -111,7 +138,8 @@ const getRFIStats = async (req, res, next) => {
             dueDate: { $lt: now }
         })
             .populate('projectId', 'name')
-            .populate('assignedTo', 'fullName')
+            .populate('raisedBy', 'fullName role')
+            .populate('assignedTo', 'fullName role')
             .sort({ dueDate: 1 })
             .limit(5);
 
@@ -139,11 +167,25 @@ const getRFIById = async (req, res, next) => {
             const projects = await Project.find({ clientId: req.user._id }, '_id');
             const projectIds = projects.map(p => p._id);
             query.projectId = { $in: projectIds };
+
+            // Exclude subcontractor RFIs from client access
+            const User = require('../models/User');
+            const subs = await User.find({ role: 'SUBCONTRACTOR' }, '_id');
+            query.raisedBy = { $nin: subs.map(s => s._id) };
         } else if (req.user.role === 'SUBCONTRACTOR') {
             query.$or = [
                 { raisedBy: req.user._id },
                 { assignedTo: req.user._id }
             ];
+        } else if (req.user.role === 'FOREMAN') {
+            query.raisedBy = req.user._id;
+        } else if (req.user.role === 'PM') {
+            const Project = require('../models/Project');
+            const projects = await Project.find({ 
+                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
+            }, '_id');
+            const projectIds = projects.map(p => p._id);
+            query.projectId = { $in: projectIds };
         }
 
         const rfi = await RFI.findOne(query)

@@ -14,7 +14,7 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'construction_photos',
-        allowed_formats: ['jpg', 'jpeg', 'png', 'gif'],
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf'],
         public_id: (req, file) => {
             const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
             return file.fieldname + '-' + uniqueSuffix;
@@ -24,10 +24,10 @@ const storage = new CloudinaryStorage({
 
 // File filter (redundant with allowed_formats but good for safety)
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
         cb(null, true);
     } else {
-        cb(new Error('Not an image! Please upload only images.'), false);
+        cb(new Error('Invalid file type! Please upload only images or PDFs.'), false);
     }
 };
 

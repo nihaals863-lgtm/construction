@@ -14,6 +14,18 @@ const getIssues = async (req, res, next) => {
                 { assignedTo: userId },
                 { reportedBy: userId }
             ];
+        } else if (role === 'PM') {
+            const Project = require('../models/Project');
+            const pmProjects = await Project.find({
+                companyId,
+                $or: [
+                    { pmIds: userId },
+                    { pmId: userId },
+                    { createdBy: userId }
+                ]
+            }).select('_id');
+            const projectIds = pmProjects.map(p => p._id);
+            query.projectId = { $in: projectIds };
         }
 
         if (req.query.projectId) query.projectId = req.query.projectId;

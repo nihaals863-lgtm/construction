@@ -32,18 +32,26 @@ const getInvoices = async (req, res, next) => {
 // @access  Private (PM, Owners)
 const createInvoice = async (req, res, next) => {
     try {
-        let { invoiceNumber } = req.body;
+        const { invoiceNumber, ...rest } = req.body;
+        let finalInvoiceNumber = invoiceNumber;
 
-        if (!invoiceNumber) {
+        if (!finalInvoiceNumber) {
             const count = await Invoice.countDocuments({ companyId: req.user.companyId });
-            invoiceNumber = `INV-${String(count + 1).padStart(3, '0')}`;
+            finalInvoiceNumber = `INV-${String(count + 1).padStart(3, '0')}`;
+        }
+
+        let invoiceImage = '';
+        if (req.file) {
+            invoiceImage = req.file.path;
         }
 
         const invoice = await Invoice.create({
-            ...req.body,
-            invoiceNumber,
+            ...rest,
+            invoiceNumber: finalInvoiceNumber,
+            invoiceImage,
             companyId: req.user.companyId,
-            createdBy: req.user._id
+            createdBy: req.user._id,
+            items: rest.items || []
         });
         res.status(201).json(invoice);
     } catch (error) {

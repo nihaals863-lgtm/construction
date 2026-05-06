@@ -42,6 +42,9 @@ const invoiceSchema = new mongoose.Schema({
     dueDate: Date,
     paidAt: Date,
     stripeInvoiceId: String,
+    invoiceImage: {
+        type: String // URL from ImageKit
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

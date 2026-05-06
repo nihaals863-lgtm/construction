@@ -631,17 +631,46 @@ const sendMessage = async (req, res, next) => {
 // @access  Private
 const getUnreadCount = async (req, res, next) => {
     try {
-        const { _id } = req.user;
-        const participants = await ChatParticipant.find({ userId: _id });
+        const { _id, role } = req.user;
+        const scope = await getUserChatScope(req.user);
+        const participants = await ChatParticipant.find({ userId: _id }).populate('roomId');
 
         let totalUnread = 0;
         for (const p of participants) {
-            const count = await Chat.countDocuments({
-                roomId: p.roomId,
-                createdAt: { $gt: p.lastReadAt },
-                sender: { $ne: _id }
-            });
-            totalUnread += count;
+            const room = p.roomId;
+            if (!room || !room.isActive) continue;
+
+            // Scoping logic to match getChatRooms
+            let isAuthorized = false;
+            if (scope.isAdmin) {
+                isAuthorized = true;
+            } else if (room.roomType === 'INTERNAL') {
+                isAuthorized = !scope.hideInternal && INTERNAL_ROLES.includes(role);
+            } else if (room.roomType === 'PROJECT_GROUP') {
+                isAuthorized = room.projectId && scope.projectIdSet.has(String(room.projectId));
+            } else if (room.roomType === 'DIRECT') {
+                const pair = room.metadata?.get ? room.metadata.get('directPair') : room.metadata?.directPair;
+                if (pair) {
+                    const otherId = pair.split(':').find(id => id !== String(_id));
+                    if (otherId && scope.directUserIdSet.has(otherId)) {
+                        isAuthorized = true;
+                    }
+                } else {
+                    const others = await ChatParticipant.findOne({ roomId: room._id, userId: { $ne: _id } });
+                    if (others && scope.directUserIdSet.has(String(others.userId))) {
+                        isAuthorized = true;
+                    }
+                }
+            }
+
+            if (isAuthorized) {
+                const count = await Chat.countDocuments({
+                    roomId: room._id,
+                    createdAt: { $gt: p.lastReadAt },
+                    sender: { $ne: _id }
+                });
+                totalUnread += count;
+            }
         }
 
         res.json({ count: totalUnread });
@@ -902,5 +931,6 @@ module.exports = {
     markAsRead,
     getOrCreateDirectRoom,
     getChatUsers,
-    syncProjectParticipants
+    syncProjectParticipants,
+    getUserChatScope
 };

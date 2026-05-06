@@ -69,7 +69,7 @@ const getPhotos = async (req, res, next) => {
         const photos = await Photo.find(query)
             .select('-companyId')
             .populate('projectId', 'name')
-            .populate('uploadedBy', 'fullName')
+            .populate('uploadedBy', 'fullName role')
             .sort({ createdAt: -1 })
             .lean();
 
@@ -114,7 +114,7 @@ const uploadPhoto = async (req, res, next) => {
 
         const populated = await Photo.findById(photo._id)
             .populate('projectId', 'name')
-            .populate('uploadedBy', 'fullName')
+            .populate('uploadedBy', 'fullName role')
             .lean();
 
         res.status(201).json(populated);

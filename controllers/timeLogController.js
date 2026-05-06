@@ -17,6 +17,54 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
     return R * c; // Distance in meters
 };
 
+const https = require('https');
+
+const reverseGeocode = async (lat, lng) => {
+    return new Promise((resolve) => {
+        if (!lat && lat !== 0) return resolve(null);
+        if (!lng && lng !== 0) return resolve(null);
+        
+        const options = {
+            hostname: 'nominatim.openstreetmap.org',
+            path: `/reverse?lat=${lat}&lon=${lng}&format=json`,
+            headers: {
+                'User-Agent': 'ConstructionSaaS-Backend/1.0',
+                'Accept-Language': 'en'
+            }
+        };
+
+        const req = https.get(options, (res) => {
+            if (res.statusCode !== 200) return resolve(null);
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    if (json.address) {
+                        const addr = json.address;
+                        const short = [
+                            addr.road || addr.neighbourhood,
+                            addr.city || addr.town || addr.village || addr.county,
+                            addr.country
+                        ].filter(Boolean).join(', ');
+                        resolve(short || json.display_name?.split(',').slice(0, 2).join(','));
+                    } else {
+                        resolve(null);
+                    }
+                } catch (e) {
+                    resolve(null);
+                }
+            });
+        });
+        
+        req.on('error', () => resolve(null));
+        req.setTimeout(3000, () => {
+            req.destroy();
+            resolve(null);
+        });
+    });
+};
+
 // @desc    Clock In
 // @route   POST /api/timelogs/clock-in
 // @access  Private
@@ -109,7 +157,8 @@ const clockIn = async (req, res, next) => {
             createdBy: req.user._id,
             createdByRole: req.user.role,
             deviceInfo: isManual ? `Manual Entry by ${req.user.role}` : deviceInfo,
-            clockOut: (isManual && req.body.clockOut) ? new Date(req.body.clockOut) : null
+            clockOut: (isManual && req.body.clockOut) ? new Date(req.body.clockOut) : null,
+            clockInAddress: await reverseGeocode(latitude, longitude)
         });
 
         // If taskId is provided, update task status to 'in_progress'
@@ -240,10 +289,15 @@ const clockOut = async (req, res, next) => {
         if (isManual) {
             log.isManual = true;
             log.reason = reason || log.reason;
-            // Record who performed the manual action if it was changed during clock-out
             log.createdBy = req.user._id;
             log.createdByRole = req.user.role;
         }
+
+        // Resolve clock-out address
+        if (latitude && longitude) {
+            log.clockOutAddress = await reverseGeocode(latitude, longitude);
+        }
+
         await log.save();
 
         // Auto-set Job to 'on-hold' when worker clocks out (only if it was active)
@@ -282,7 +336,7 @@ const getTimeLogs = async (req, res, next) => {
         if (req.query.projectId) query.projectId = req.query.projectId;
 
         const logs = await TimeLog.find(query)
-            .populate('userId', 'fullName email')
+            .populate('userId', 'fullName email role')
             .populate('projectId', 'name')
             .populate('jobId', 'name')
             .populate('taskId', 'title')
@@ -310,7 +364,7 @@ const updateTimeLog = async (req, res, next) => {
         const updatedLog = await TimeLog.findByIdAndUpdate(req.params.id, req.body, {
             new: true,
             runValidators: true
-        }).populate('userId', 'fullName email').populate('projectId', 'name');
+        }).populate('userId', 'fullName email role').populate('projectId', 'name');
 
         res.json(updatedLog);
     } catch (error) {

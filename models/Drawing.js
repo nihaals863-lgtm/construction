@@ -20,7 +20,6 @@ const drawingSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ['architectural', 'structural', 'mechanical', 'electrical', 'plumbing', 'civil', 'other'],
         default: 'architectural'
     },
     versions: [{

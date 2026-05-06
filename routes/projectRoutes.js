@@ -34,6 +34,6 @@ router.post('/:id/client-updates', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM
 router.get('/:id/financial-summary', getProjectFinancialSummary);
 router.patch('/:id/restore', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), restoreProject);
 router.delete('/:id/permanent', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), permanentlyDeleteProject);
-router.delete('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER', 'PM'), deleteProject); // Changed access to include PM for archiving
+router.delete('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), deleteProject); // Only Admins can archive/delete projects
 
 module.exports = router;

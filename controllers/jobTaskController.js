@@ -240,13 +240,14 @@ const updateJobTask = async (req, res) => {
 
             // Notify creator if status updated by someone else
             if (task.createdBy.toString() !== req.user._id.toString()) {
+                const job = await Job.findById(task.jobId);
                 await Notification.create({
                     companyId: req.user.companyId,
                     userId: task.createdBy,
                     title: 'Task Status Updated',
                     message: `Task "${task.title}" status changed to ${task.status} by ${req.user.fullName}.`,
                     type: 'task',
-                    link: `/company-admin/projects/all/jobs/${task.jobId}`
+                    link: `/company-admin/projects/${job?.projectId || 'all'}/jobs/${task.jobId}`
                 });
 
                 const io = req.app.get('io');
