@@ -63,12 +63,13 @@ const getProjects = async (req, res, next) => {
         // We exclude 'image' if it's too large, but since we migrated to Cloudinary, 
         // we'll keep it but ensure old Base64 data doesn't bloat the response.
         const projects = await Project.find(query)
-            .select('name status pmIds pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image startDate endDate')
+            .select('name status pmIds pmId clientId createdAt budget currentPhase location siteLatitude siteLongitude progress image startDate endDate sortOrder')
             .populate('clientId', 'fullName email')
             .populate('pmIds', 'fullName email')
             .populate('pmId', 'fullName email')
-            .sort({ createdAt: -1 })
+            .sort({ sortOrder: 1, createdAt: -1 })
             .lean();
+
 
         res.json(projects);
     } catch (error) {
@@ -150,6 +151,16 @@ const createProject = async (req, res, next) => {
             finalImage = req.file.path;
         }
 
+        // Handle location parsing (can be string address or stringified JSON)
+        let finalLocation = location;
+        if (typeof location === 'string' && location) {
+            try {
+                finalLocation = JSON.parse(location);
+            } catch (e) {
+                finalLocation = { address: location };
+            }
+        }
+
         const project = await Project.create({
             companyId: req.user.companyId,
             name,
@@ -157,13 +168,14 @@ const createProject = async (req, res, next) => {
             startDate,
             endDate,
             budget,
-            location,
+            location: finalLocation,
             geofenceRadius,
             image: finalImage,
             pmIds: Array.isArray(pmIds) ? pmIds : (pmId ? [pmId] : []),
             pmId: Array.isArray(pmIds) ? pmIds[0] : pmId, // Keep for backward compatibility if needed
             createdBy: req.user._id
         });
+
 
         // CREATE CHAT ROOM FOR PROJECT
         try {
@@ -223,11 +235,26 @@ const updateProject = async (req, res, next) => {
             }
         });
 
+        // Parse pmIds
         if (typeof updateData.pmIds === 'string') {
             try {
                 updateData.pmIds = JSON.parse(updateData.pmIds);
             } catch (e) {
                 updateData.pmIds = updateData.pmIds.split(',').filter(id => id.trim());
+            }
+        }
+
+        // Sync legacy pmId with pmIds[0]
+        if (updateData.pmIds && Array.isArray(updateData.pmIds)) {
+            updateData.pmId = updateData.pmIds[0] || null;
+        }
+
+        // Handle location parsing (can be string address or stringified JSON)
+        if (typeof updateData.location === 'string' && updateData.location) {
+            try {
+                updateData.location = JSON.parse(updateData.location);
+            } catch (e) {
+                updateData.location = { address: updateData.location };
             }
         }
 
@@ -243,17 +270,28 @@ const updateProject = async (req, res, next) => {
             .populate('createdBy', 'fullName')
             .lean();
 
+        if (!updatedProject) {
+            res.status(404);
+            throw new Error('Project not found during update');
+        }
+
         // Sync chat participants if PM or Client changed
-        if (req.body.pmIds || req.body.pmId || req.body.clientId) {
-            const { syncProjectParticipants } = require('./chatController');
-            await syncProjectParticipants(updatedProject._id);
+        if (updateData.pmIds || updateData.pmId || updateData.clientId) {
+            try {
+                const { syncProjectParticipants } = require('./chatController');
+                await syncProjectParticipants(updatedProject._id);
+            } catch (syncErr) {
+                console.error('Chat sync failed after project update:', syncErr.message);
+            }
         }
 
         res.json(updatedProject);
     } catch (error) {
+        console.error('Update Project Error:', error);
         next(error);
     }
 };
+
 
 // @desc    Archive project (Soft delete)
 // @route   DELETE /api/projects/:id
@@ -597,6 +635,36 @@ const getProjectFinancialSummary = async (req, res, next) => {
     }
 };
 
+// @desc    Reorder projects
+// @route   POST /api/projects/reorder
+// @access  Private (COMPANY_OWNER, SUPER_ADMIN)
+const reorderProjects = async (req, res, next) => {
+    try {
+        const { projectIds } = req.body;
+        if (!projectIds || !Array.isArray(projectIds)) {
+            res.status(400);
+            throw new Error('Project IDs array is required');
+        }
+
+        const bulkOps = projectIds.map((id, index) => ({
+            updateOne: {
+                filter: { _id: id, companyId: req.user.companyId },
+                update: { sortOrder: index }
+            }
+        }));
+
+        if (req.user.role === 'SUPER_ADMIN') {
+            bulkOps.forEach(op => delete op.updateOne.filter.companyId);
+        }
+
+        await Project.bulkWrite(bulkOps);
+
+        res.json({ message: 'Projects reordered successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getProjects,
     getProjectById,
@@ -610,5 +678,7 @@ module.exports = {
     getProjectFinancialSummary,
     getArchivedProjects,
     restoreProject,
-    permanentlyDeleteProject
+    permanentlyDeleteProject,
+    reorderProjects
 };
+

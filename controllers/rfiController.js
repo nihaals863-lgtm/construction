@@ -30,15 +30,8 @@ const getRFIs = async (req, res, next) => {
         } else if (req.user.role === 'FOREMAN') {
             // Foreman: Only RFIs they raised
             query.raisedBy = req.user._id;
-        } else if (req.user.role === 'PM') {
-            // PM: Assigned projects
-            const Project = require('../models/Project');
-            const projects = await Project.find({ 
-                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
-            }, '_id');
-            const projectIds = projects.map(p => p._id);
-            query.projectId = { $in: projectIds };
         }
+        // PM and Admin/Owner see all RFIs of the company by default (query.companyId is already set)
 
         if (req.query.projectId) {
             // Ensure the requested projectId is within the allowed scope for CLIENT
@@ -103,14 +96,8 @@ const getRFIStats = async (req, res, next) => {
             ];
         } else if (req.user.role === 'FOREMAN') {
             query.raisedBy = req.user._id;
-        } else if (req.user.role === 'PM') {
-            const Project = require('../models/Project');
-            const projects = await Project.find({ 
-                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
-            }, '_id');
-            const projectIds = projects.map(p => p._id);
-            query.projectId = { $in: projectIds };
         }
+        // PM and Admin/Owner see all RFI stats of the company by default
 
         const [total, open, inReview, answered, closed, overdue, highPriority, recent] = await Promise.all([
             RFI.countDocuments(query),
@@ -179,14 +166,8 @@ const getRFIById = async (req, res, next) => {
             ];
         } else if (req.user.role === 'FOREMAN') {
             query.raisedBy = req.user._id;
-        } else if (req.user.role === 'PM') {
-            const Project = require('../models/Project');
-            const projects = await Project.find({ 
-                $or: [{ pmIds: req.user._id }, { pmId: req.user._id }, { createdBy: req.user._id }] 
-            }, '_id');
-            const projectIds = projects.map(p => p._id);
-            query.projectId = { $in: projectIds };
         }
+        // PM and Admin/Owner have global access to RFIs in the company
 
         const rfi = await RFI.findOne(query)
             .populate('projectId', 'name')

@@ -373,16 +373,16 @@ const createUser = async (req, res, next) => {
 // @access  Private
 const updatePassword = async (req, res, next) => {
     try {
-        const { currentPassword, newPassword } = req.body;
+        const { newPassword } = req.body;
         const user = await User.findById(req.user._id);
 
-        if (user && (await user.matchPassword(currentPassword))) {
+        if (user) {
             user.password = newPassword;
             await user.save();
             res.json({ message: 'Password updated' });
         } else {
-            res.status(401);
-            throw new Error('Invalid current password');
+            res.status(404);
+            throw new Error('User not found');
         }
     } catch (error) {
         next(error);

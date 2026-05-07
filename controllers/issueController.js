@@ -14,19 +14,8 @@ const getIssues = async (req, res, next) => {
                 { assignedTo: userId },
                 { reportedBy: userId }
             ];
-        } else if (role === 'PM') {
-            const Project = require('../models/Project');
-            const pmProjects = await Project.find({
-                companyId,
-                $or: [
-                    { pmIds: userId },
-                    { pmId: userId },
-                    { createdBy: userId }
-                ]
-            }).select('_id');
-            const projectIds = pmProjects.map(p => p._id);
-            query.projectId = { $in: projectIds };
         }
+        // PM and Admin/Owner see all issues of the company by default (query.companyId is already set)
 
         if (req.query.projectId) query.projectId = req.query.projectId;
         if (req.query.jobId) query.jobId = req.query.jobId;

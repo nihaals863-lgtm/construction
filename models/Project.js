@@ -79,7 +79,12 @@ const projectSchema = new mongoose.Schema({
         email: { type: String },
         phone: { type: String },
         role: { type: String }
-    }]
+    }],
+    sortOrder: {
+        type: Number,
+        default: 0
+    }
+
 }, {
     timestamps: true
 });

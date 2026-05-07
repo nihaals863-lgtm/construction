@@ -13,8 +13,10 @@ const {
     getProjectFinancialSummary,
     getArchivedProjects,
     restoreProject,
-    permanentlyDeleteProject
+    permanentlyDeleteProject,
+    reorderProjects
 } = require('../controllers/projectController');
+
 const { protect, authorize } = require('../middlewares/authMiddleware');
 const { checkProjectLimit } = require('../middlewares/checkPlanLimits');
 const upload = require('../middlewares/uploadMiddleware');
@@ -22,7 +24,9 @@ const upload = require('../middlewares/uploadMiddleware');
 router.use(protect); // All routes protected
 
 router.get('/', getProjects);
+router.post('/reorder', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), reorderProjects);
 router.get('/archived', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), getArchivedProjects);
+
 router.get('/:id', getProjectById);
 router.get('/:id/members', getProjectMembers);
 router.post('/', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), checkProjectLimit, upload.single('image'), createProject);
