@@ -7,7 +7,7 @@ const upload = require('../middlewares/uploadMiddleware');
 router.use(protect);
 
 router.get('/', getPhotos);
-router.post('/upload', upload.single('image'), uploadPhoto);
+router.post('/upload', upload.array('images', 10), uploadPhoto);
 router.delete('/:id', deletePhoto);
 
 module.exports = router;

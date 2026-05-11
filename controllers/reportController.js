@@ -13,6 +13,7 @@ const Job = require('../models/Job');
 const { getUserChatScope } = require('./chatController');
 const JobTask = require('../models/JobTask');
 const SubTask = require('../models/SubTask');
+const ProjectNote = require('../models/ProjectNote');
 const JobNote = require('../models/JobNote');
 const Notification = require('../models/Notification');
 const ChatParticipant = require('../models/ChatParticipant');
@@ -1114,12 +1115,13 @@ const getDetailedProjectReport = async (req, res, next) => {
             throw new Error('Project not found');
         }
 
-        const [jobs, projectTasks, projectRFIs, projectIssues, projectDailyLogs] = await Promise.all([
+        const [jobs, projectTasks, projectRFIs, projectIssues, projectDailyLogs, projectNotes] = await Promise.all([
             Job.find({ projectId, companyId }).select('name description budget status startDate endDate progress').lean(),
             Task.find({ projectId, companyId }).populate('assignedTo', 'fullName role').select('title status dueDate assignedTo').lean(),
             RFI.find({ projectId, companyId }).select('subject status dueDate').lean(),
             Issue.find({ projectId, companyId }).populate('assignedTo', 'fullName').populate('reportedBy', 'fullName').select('title status priority assignedTo reportedBy createdAt').sort({ createdAt: -1 }).lean(),
-            DailyLog.find({ projectId, companyId }).populate('reportedBy', 'fullName').select('date reportedBy weather workPerformed notes completed manpower createdAt').sort({ date: -1 }).lean()
+            DailyLog.find({ projectId, companyId }).populate('reportedBy', 'fullName').select('date reportedBy weather workPerformed notes completed manpower createdAt').sort({ date: -1 }).lean(),
+            ProjectNote.find({ projectId, companyId }).populate('createdBy', 'fullName').sort({ createdAt: -1 }).lean()
         ]);
 
         const detailedJobs = await Promise.all(jobs.map(async (job) => {
@@ -1341,6 +1343,11 @@ const getDetailedProjectReport = async (req, res, next) => {
                     weather: log.weather ? `${log.weather.status || '---'}${log.weather.temperature ? `, ${log.weather.temperature}°C` : ''}` : '---',
                     notes: log.notes || log.workPerformed || '',
                     crewCount: log.crew?.length || log.manpower?.reduce((acc, m) => acc + (m.count || 0), 0) || 0
+                })),
+                projectNotes: projectNotes.map(n => ({
+                    content: n.content,
+                    author: n.createdBy?.fullName || 'System',
+                    date: n.createdAt
                 }))
             },
             jobs: detailedJobs

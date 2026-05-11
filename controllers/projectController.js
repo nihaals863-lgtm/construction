@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Company = require('../models/Company');
 const Plan = require('../models/Plan');
 const Job = require('../models/Job');
+const ProjectNote = require('../models/ProjectNote');
 
 
 // @desc    Get projects for the company
@@ -665,6 +666,70 @@ const reorderProjects = async (req, res, next) => {
     }
 };
 
+// @desc    Get project notes
+// @route   GET /api/projects/:id/notes
+// @access  Private
+const getProjectNotes = async (req, res, next) => {
+    try {
+        const notes = await ProjectNote.find({ 
+            projectId: req.params.id, 
+            companyId: req.user.companyId 
+        })
+        .populate('createdBy', 'fullName avatar')
+        .sort({ createdAt: -1 });
+        
+        res.json(notes);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @desc    Create a project note
+// @route   POST /api/projects/:id/notes
+// @access  Private
+const createProjectNote = async (req, res, next) => {
+    try {
+        const { content } = req.body;
+        if (!content) {
+            res.status(400);
+            throw new Error('Content is required');
+        }
+
+        const note = await ProjectNote.create({
+            projectId: req.params.id,
+            companyId: req.user.companyId,
+            content,
+            createdBy: req.user._id
+        });
+
+        const populated = await ProjectNote.findById(note._id).populate('createdBy', 'fullName avatar');
+        res.status(201).json(populated);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @desc    Delete a project note
+// @route   DELETE /api/projects/:id/notes/:noteId
+// @access  Private
+const deleteProjectNote = async (req, res, next) => {
+    try {
+        const note = await ProjectNote.findOneAndDelete({
+            _id: req.params.noteId,
+            companyId: req.user.companyId
+        });
+        
+        if (!note) {
+            res.status(404);
+            throw new Error('Note not found');
+        }
+        
+        res.json({ message: 'Note deleted' });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getProjects,
     getProjectById,
@@ -679,6 +744,9 @@ module.exports = {
     getArchivedProjects,
     restoreProject,
     permanentlyDeleteProject,
-    reorderProjects
+    reorderProjects,
+    getProjectNotes,
+    createProjectNote,
+    deleteProjectNote
 };
 

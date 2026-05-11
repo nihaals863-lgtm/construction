@@ -14,7 +14,10 @@ const {
     getArchivedProjects,
     restoreProject,
     permanentlyDeleteProject,
-    reorderProjects
+    reorderProjects,
+    getProjectNotes,
+    createProjectNote,
+    deleteProjectNote
 } = require('../controllers/projectController');
 
 const { protect, authorize } = require('../middlewares/authMiddleware');
@@ -39,5 +42,10 @@ router.get('/:id/financial-summary', getProjectFinancialSummary);
 router.patch('/:id/restore', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), restoreProject);
 router.delete('/:id/permanent', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), permanentlyDeleteProject);
 router.delete('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), deleteProject); // Only Admins can archive/delete projects
+
+// Project Notes
+router.get('/:id/notes', getProjectNotes);
+router.post('/:id/notes', createProjectNote);
+router.delete('/:id/notes/:noteId', deleteProjectNote);
 
 module.exports = router;

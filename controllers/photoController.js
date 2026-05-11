@@ -84,37 +84,51 @@ const getPhotos = async (req, res, next) => {
 // @access  Private
 const uploadPhoto = async (req, res, next) => {
     try {
-        console.log('Upload Request Headers:', req.headers);
         console.log('Upload Request Body:', req.body);
-        console.log('Upload Request File:', req.file);
+        console.log('Upload Request Files:', req.files);
 
         const { projectId, taskId, description } = req.body;
+        const photos = [];
 
-        // Construct imageUrl from the file saved by multer
-        let imageUrl = req.body.imageUrl; // fallback for legacy or manual URLs
-
-        if (req.file) {
-            // For Cloudinary, req.file.path is already the full URL
-            imageUrl = req.file.path;
+        // Handle Multiple Files
+        if (req.files && req.files.length > 0) {
+            for (const file of req.files) {
+                const imageUrl = file.path;
+                const photo = await Photo.create({
+                    companyId: req.user.companyId,
+                    projectId: projectId || undefined,
+                    taskId: taskId || undefined,
+                    uploadedBy: req.user._id,
+                    imageUrl,
+                    description: description || file.originalname // Fallback to filename if no description
+                });
+                photos.push(photo);
+            }
+        } 
+        // Handle Single Image URL (External)
+        else if (req.body.imageUrl) {
+            const photo = await Photo.create({
+                companyId: req.user.companyId,
+                projectId: projectId || undefined,
+                taskId: taskId || undefined,
+                uploadedBy: req.user._id,
+                imageUrl: req.body.imageUrl,
+                description
+            });
+            photos.push(photo);
         }
 
-        if (!imageUrl) {
+        if (photos.length === 0) {
             res.status(400);
-            throw new Error('Please upload an image file or provide an imageUrl');
+            throw new Error('Please upload at least one image file or provide an imageUrl');
         }
 
-        const photo = await Photo.create({
-            companyId: req.user.companyId,
-            projectId: projectId || undefined,
-            taskId: taskId || undefined,
-            uploadedBy: req.user._id,
-            imageUrl,
-            description
-        });
-
-        const populated = await Photo.findById(photo._id)
+        // Return the first one or all? Let's return all for frontend consistency
+        const photoIds = photos.map(p => p._id);
+        const populated = await Photo.find({ _id: { $in: photoIds } })
             .populate('projectId', 'name')
             .populate('uploadedBy', 'fullName role')
+            .sort({ createdAt: -1 })
             .lean();
 
         res.status(201).json(populated);

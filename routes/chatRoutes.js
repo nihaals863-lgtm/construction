@@ -54,17 +54,19 @@ router.get('/download', async (req, res) => {
     }
 });
 
-router.post('/upload', upload.single('file'), imageKitUpload, (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded' });
+router.post('/upload', upload.array('files', 10), imageKitUpload, (req, res) => {
+    const files = req.files || [];
+    if (files.length === 0) {
+        return res.status(400).json({ message: 'No files uploaded' });
     }
     
-    // req.file.path already contains the ImageKit URL thanks to imageKitUpload middleware
-    res.json({
-        name: req.file.originalname,
-        url: req.file.path,
-        fileType: req.file.mimetype
-    });
+    const results = files.map(file => ({
+        name: file.originalname,
+        url: file.path,
+        fileType: file.mimetype
+    }));
+    
+    res.json(results);
 });
 
 router.get('/rooms', getChatRooms);

@@ -644,53 +644,51 @@ const generateJobHistoryPDF = async (req, res) => {
     }
 };
 
-// GET /jobs/:id/notes
+// @desc    Get job notes
+// @route   GET /api/jobs/:id/notes
+// @access  Private
 const getJobNotes = async (req, res) => {
     try {
-        const notes = await JobNote.find({ 
-            jobId: req.params.id, 
-            companyId: req.user.companyId 
-        })
-        .populate('createdBy', 'fullName avatar')
-        .sort({ createdAt: -1 });
-        
+        const notes = await JobNote.find({ jobId: req.params.id })
+            .populate('createdBy', 'fullName avatar')
+            .sort({ createdAt: -1 });
         res.json(notes);
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
 };
 
-// POST /jobs/:id/notes
+// @desc    Create job note
+// @route   POST /api/jobs/:id/notes
+// @access  Private
 const createJobNote = async (req, res) => {
     try {
-        const { content } = req.body;
-        if (!content) return res.status(400).json({ message: 'Content is required' });
-
         const note = await JobNote.create({
             jobId: req.params.id,
-            companyId: req.user.companyId,
-            content,
+            content: req.body.content,
             createdBy: req.user._id
         });
-
-        const populated = await JobNote.findById(note._id).populate('createdBy', 'fullName avatar');
+        const populated = await note.populate('createdBy', 'fullName avatar');
         res.status(201).json(populated);
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
 };
 
-// DELETE /jobs/:id/notes/:noteId
+// @desc    Delete job note
+// @route   DELETE /api/jobs/:id/notes/:noteId
+// @access  Private
 const deleteJobNote = async (req, res) => {
     try {
-        const note = await JobNote.findOneAndDelete({
-            _id: req.params.noteId,
-            companyId: req.user.companyId
-        });
-        
+        const note = await JobNote.findById(req.params.noteId);
         if (!note) return res.status(404).json({ message: 'Note not found' });
         
-        res.json({ message: 'Note deleted' });
+        if (req.user.role !== 'COMPANY_OWNER' && note.createdBy.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: 'Not authorized to delete this note' });
+        }
+
+        await JobNote.findByIdAndDelete(req.params.noteId);
+        res.json({ message: 'Note removed' });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }

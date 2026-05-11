@@ -1,9 +1,14 @@
 const mongoose = require('mongoose');
 
-const jobNoteSchema = new mongoose.Schema({
-    jobId: {
+const projectNoteSchema = new mongoose.Schema({
+    projectId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Job',
+        ref: 'Project',
+        required: true
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
         required: true
     },
     content: {
@@ -19,4 +24,4 @@ const jobNoteSchema = new mongoose.Schema({
     timestamps: true
 });
 
-module.exports = mongoose.model('JobNote', jobNoteSchema);
+module.exports = mongoose.model('ProjectNote', projectNoteSchema);
