@@ -135,6 +135,8 @@ const loginUser = async (req, res, next) => {
                 role: user.role,
                 companyId: user.companyId,
                 avatar: user.avatar,
+                phone: user.phone,
+                address: user.address,
                 token,
                 permissions
             });
@@ -209,6 +211,8 @@ const getMe = async (req, res, next) => {
                 role: user.role,
                 companyId: user.companyId,
                 avatar: user.avatar,
+                phone: user.phone,
+                address: user.address,
                 companyDetails: user.companyId ? await Company.findById(user.companyId).populate('subscriptionPlanId').lean() : null
             });
         } else {
@@ -415,6 +419,7 @@ const updateProfile = async (req, res, next) => {
             if (company) {
                 if (req.body.address) company.address = req.body.address;
                 if (req.body.phone) company.phone = req.body.phone;
+                if (req.body.email) company.email = req.body.email;
                 await company.save();
             }
         }

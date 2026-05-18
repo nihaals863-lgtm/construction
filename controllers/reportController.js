@@ -1479,11 +1479,24 @@ const getSidebarMetrics = async (req, res, next) => {
             }
         }
 
-        // 2. Unread Notifications & Issues & Projects/Jobs
-        const [notifCount, issueCount, projectsData] = await Promise.all([
+        // 5. Purchase Order Count (Role-aware)
+        let poQuery = { companyId };
+        if (isGlobalRole) {
+            poQuery.status = { $in: ['Draft', 'Pending Approval'] };
+        } else if (role === 'PM') {
+            poQuery.projectId = { $in: accessibleProjectIds };
+            poQuery.status = { $in: ['Draft', 'Pending Approval'] };
+        } else {
+            poQuery.createdBy = userId;
+            poQuery.status = 'Draft';
+        }
+
+        // 2. Unread Notifications & Issues & Projects/Jobs & POs
+        const [notifCount, issueCount, projectsData, poCount] = await Promise.all([
             Notification.countDocuments({ companyId, userId, isRead: false }),
             Issue.countDocuments(issueQuery),
-            Project.find(projectFilter).select('name status').lean()
+            Project.find(projectFilter).select('name status').lean(),
+            PurchaseOrder.countDocuments(poQuery)
         ]);
 
         let finalProjects = projectsData.map(p => ({
@@ -1526,7 +1539,8 @@ const getSidebarMetrics = async (req, res, next) => {
             issueCount,
             chatUnreadCount,
             notificationCount: notifCount,
-            projects: finalProjects
+            projects: finalProjects,
+            poCount
         });
 
     } catch (error) {
