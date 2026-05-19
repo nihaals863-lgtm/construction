@@ -609,6 +609,8 @@ const sendMessage = async (req, res, next) => {
             // Background notifications
             const notifyOthers = async () => {
                 const others = await ChatParticipant.find({ roomId: actualRoomId, userId: { $ne: _id } });
+                
+                // Real-time socket notification
                 others.forEach(p => {
                     io.to(p.userId.toString()).emit('new_notification', {
                         type: 'chat',
@@ -616,6 +618,32 @@ const sendMessage = async (req, res, next) => {
                         senderName: req.user.fullName
                     });
                 });
+
+                // Send Firebase push notifications for offline/closed clients
+                const otherUserIds = others.map(p => p.userId);
+                if (otherUserIds.length > 0) {
+                    const senderName = req.user.fullName || 'Someone';
+                    const notificationTitle = `New message from ${senderName}`;
+                    const notificationBody = message || 'Sent an attachment';
+                    
+                    try {
+                        const { sendPushNotification } = require('../utils/fcmHelper');
+                        await sendPushNotification(
+                            otherUserIds,
+                            notificationTitle,
+                            notificationBody,
+                            {
+                                roomId: actualRoomId.toString(),
+                                type: 'chat',
+                                senderId: _id.toString(),
+                                senderName
+                            },
+                            io
+                        );
+                    } catch (fcmErr) {
+                        console.error('[FCM chatController Error]', fcmErr.message);
+                    }
+                }
             };
             notifyOthers().catch(err => console.error('Notification error:', err));
         }

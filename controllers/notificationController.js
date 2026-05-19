@@ -1,4 +1,5 @@
 const Notification = require('../models/Notification');
+const FcmToken = require('../models/FcmToken');
 
 // @desc    Get user notifications
 // @route   GET /api/notifications
@@ -62,9 +63,62 @@ const clearAllNotifications = async (req, res, next) => {
     }
 };
 
+// @desc    Register or update FCM Token
+// @route   POST /api/notifications/fcm-token
+// @access  Private
+const updateFcmToken = async (req, res, next) => {
+    try {
+        const { token, platform } = req.body;
+        if (!token || !platform) {
+            res.status(400);
+            throw new Error('FCM token and platform are required');
+        }
+
+        const fcmToken = await FcmToken.findOneAndUpdate(
+            { token },
+            {
+                userId: req.user._id,
+                platform,
+                isActive: true
+            },
+            { new: true, upsert: true }
+        );
+
+        res.status(200).json({ success: true, message: 'FCM token registered successfully', data: fcmToken });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Deactivate FCM Token
+// @route   POST /api/notifications/fcm-token/deactivate
+// @access  Private
+const deactivateFcmToken = async (req, res, next) => {
+    try {
+        const { token } = req.body;
+        if (!token) {
+            res.status(400);
+            throw new Error('FCM token is required to deactivate');
+        }
+
+        await FcmToken.findOneAndUpdate(
+            { token, userId: req.user._id },
+            { isActive: false },
+            { new: true }
+        );
+
+        res.status(200).json({ success: true, message: 'FCM token deactivated successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getNotifications,
     markAsRead,
     markAllRead,
-    clearAllNotifications
+    clearAllNotifications,
+    updateFcmToken,
+    deactivateFcmToken
 };
+
