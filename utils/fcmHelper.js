@@ -128,7 +128,8 @@ const sendPushNotification = async (userIds, title, body, extraData = {}, io = n
             android: {
                 priority: 'high',
                 notification: {
-                    sound: 'default'
+                    sound: 'default',
+                    channelId: 'high_importance_channel'
                 }
             },
             apns: {
