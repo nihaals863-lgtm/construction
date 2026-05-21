@@ -104,6 +104,11 @@ app.use('/api/task-templates', taskTemplateRoutes);
 app.use('/api/todos', todoRoutes);
 app.use('/api/project-documents', projectDocumentRoutes);
 
+
+
+
+
+
 // Root Route
 app.get('/', (req, res) => {
     res.send('Construction SaaS Backend API is running...');
