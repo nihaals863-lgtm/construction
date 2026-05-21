@@ -65,6 +65,8 @@ const sendPushNotification = async (userIds, title, body, extraData = {}, io = n
             return;
         }
 
+        console.log(`[FCM] Saved device tokens in database for users ${ids.join(', ')}:`, tokensDoc.map(d => ({ token: d.token, platform: d.platform })));
+
         // Group tokens by userId to check online status per user
         const tokensByUser = {};
         tokensDoc.forEach(doc => {
@@ -114,17 +116,30 @@ const sendPushNotification = async (userIds, title, body, extraData = {}, io = n
             return;
         }
 
-        // Prepare message payload
-        const payload = {
+        // Ensure all extraData values are strings
+        const safeData = {};
+        for (const key in extraData) {
+            if (extraData[key] !== null && extraData[key] !== undefined) {
+                safeData[key] = String(extraData[key]);
+            }
+        }
+        
+        // Add chatId explicitly if roomId is present to meet payload requirement
+        if (safeData.roomId && !safeData.chatId) {
+            safeData.chatId = safeData.roomId;
+        }
+        if (!safeData.type) {
+            safeData.type = 'chat';
+        }
+
+        // Prepare message payload array strictly following the requested format
+        const messages = targetTokens.map(token => ({
+            token: token,
             notification: {
-                title,
-                body
+                title: title,
+                body: body
             },
-            data: {
-                ...extraData,
-                title,
-                body
-            },
+            data: safeData,
             android: {
                 priority: 'high',
                 notification: {
@@ -133,21 +148,26 @@ const sendPushNotification = async (userIds, title, body, extraData = {}, io = n
                 }
             },
             apns: {
+                headers: {
+                    'apns-priority': '10',
+                    'apns-push-type': 'alert'
+                },
                 payload: {
                     aps: {
                         sound: 'default',
-                        badge: 1
+                        badge: 1,
+                        'content-available': 1
                     }
                 }
             }
-        };
+        }));
 
-        // Send to each token
-        const response = await messaging.sendEachForMulticast({
-            tokens: targetTokens,
-            ...payload
-        });
+        console.log('[FCM] Backend notification payload:', JSON.stringify(messages, null, 2));
 
+        // Send using sendEach instead of sendEachForMulticast since we constructed the array
+        const response = await messaging.sendEach(messages);
+
+        console.log(`[FCM] Firebase Admin send response:`, JSON.stringify(response, null, 2));
         console.log(`[FCM] Sent notifications. Success: ${response.successCount}, Failure: ${response.failureCount}`);
 
         // Clean up invalid or unregistered tokens
