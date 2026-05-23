@@ -13,6 +13,10 @@ const projectDocumentSchema = new mongoose.Schema({
     description: {
         type: String
     },
+    category: {
+        type: String,
+        default: 'General'
+    },
     uploadDate: {
         type: Date,
         default: Date.now

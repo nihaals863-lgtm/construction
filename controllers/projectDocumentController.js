@@ -2,7 +2,7 @@ const ProjectDocument = require('../models/ProjectDocument');
 
 exports.createDocument = async (req, res) => {
     try {
-        const { projectId, title, description, uploadDate } = req.body;
+        const { projectId, title, description, uploadDate, category } = req.body;
         const fileUrl = req.file ? req.file.path : null;
 
         if (!fileUrl) {
@@ -13,6 +13,7 @@ exports.createDocument = async (req, res) => {
             projectId,
             title,
             description,
+            category: category || 'General',
             uploadDate: uploadDate || new Date(),
             fileUrl,
             uploadedBy: req.user._id,
@@ -31,7 +32,7 @@ exports.getProjectDocuments = async (req, res) => {
     try {
         const { projectId } = req.params;
         const documents = await ProjectDocument.find({ projectId })
-            .populate('uploadedBy', 'name email')
+            .populate('uploadedBy', 'fullName email')
             .sort({ createdAt: -1 });
         res.json(documents);
     } catch (error) {

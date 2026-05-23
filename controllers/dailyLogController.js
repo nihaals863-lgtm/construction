@@ -13,8 +13,8 @@ const getDailyLogs = async (req, res, next) => {
             const clientProjects = await Project.find({ clientId: req.user._id }).select('_id');
             const projectIds = clientProjects.map(p => p._id);
             query.projectId = { $in: projectIds };
-        } else if (req.user.role === 'FOREMAN') {
-            // Foreman: Only show logs they reported themselves
+        } else if (['FOREMAN', 'WORKER'].includes(req.user.role)) {
+            // Foreman / Worker: Only show logs they reported themselves
             query.reportedBy = req.user._id;
         }
 
@@ -117,8 +117,8 @@ const updateDailyLog = async (req, res, next) => {
             throw new Error('Daily log not found');
         }
 
-        // Foreman security: Can only update their own logs
-        if (req.user.role === 'FOREMAN' && log.reportedBy.toString() !== req.user._id.toString()) {
+        // Foreman / Worker security: Can only update their own logs
+        if (['FOREMAN', 'WORKER'].includes(req.user.role) && log.reportedBy.toString() !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Not authorized to update this log' });
         }
 
