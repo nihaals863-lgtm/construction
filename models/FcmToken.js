@@ -16,6 +16,11 @@ const fcmTokenSchema = new mongoose.Schema({
         enum: ['android', 'ios', 'web'],
         required: true
     },
+    provider: {
+        type: String,
+        enum: ['firebase', 'expo'],
+        default: 'firebase'
+    },
     isActive: {
         type: Boolean,
         default: true

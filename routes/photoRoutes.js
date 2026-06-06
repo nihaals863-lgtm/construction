@@ -4,6 +4,7 @@ const { getPhotos, uploadPhoto, deletePhoto } = require('../controllers/photoCon
 const { protect } = require('../middlewares/authMiddleware');
 const upload = require('../middlewares/uploadMiddleware');
 
+
 router.use(protect);
 
 router.get('/', getPhotos);

@@ -810,35 +810,20 @@ const getOrCreateDirectRoom = async (req, res, next) => {
 // @access  Private
 const getChatUsers = async (req, res, next) => {
     try {
-        const { companyId, _id, role } = req.user;
+        const { companyId, _id } = req.user;
+        const scope = await getUserChatScope(req.user);
 
-        const admins = ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN'];
-        const internalRoles = ['COMPANY_OWNER', 'PM', 'FOREMAN', 'WORKER', 'SUPER_ADMIN'];
-        let roleFilter = {};
-
-        if (admins.includes(role)) {
-            // Admins can see everyone
-            roleFilter = {};
-        } else if (role === 'PM') {
-            // PMs can see all internal staff and subcontractors
-            roleFilter = { 
-                role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'] } 
-            };
-        } else if (['FOREMAN', 'WORKER'].includes(role)) {
-            // Foreman/Worker only see internal
-            roleFilter = { role: { $in: internalRoles } };
-        } else {
-            // Client/Sub only see Admins
-            roleFilter = { role: { $in: admins } };
-        }
-
-        const users = await User.find({
+        const usersQuery = {
             companyId,
             _id: { $ne: _id },
-            isActive: true,
-            ...roleFilter
-        }).select('fullName role avatar email');
+            isActive: true
+        };
 
+        if (!scope.isAdmin) {
+            usersQuery._id = { $in: Array.from(scope.directUserIdSet) };
+        }
+
+        const users = await User.find(usersQuery).select('fullName role avatar email');
         res.json(users);
     } catch (error) {
         next(error);

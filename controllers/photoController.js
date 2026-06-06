@@ -18,7 +18,15 @@ const getPhotos = async (req, res, next) => {
                     clientId: req.user._id
                 }).select('_id').lean();
                 const clientProjectIds = clientProjects.map(p => p._id.toString());
-                query.projectId = { $in: clientProjectIds };
+                
+                if (req.query.projectId) {
+                    if (!clientProjectIds.includes(req.query.projectId)) {
+                        return res.status(403).json({ message: 'Not authorized for this project' });
+                    }
+                    query.projectId = req.query.projectId;
+                } else {
+                    query.projectId = { $in: clientProjectIds };
+                }
             } else {
                 const jobFilter = { companyId: req.user.companyId };
 
@@ -38,6 +46,7 @@ const getPhotos = async (req, res, next) => {
                     .filter(j => j.projectId)
                     .map(j => j.projectId.toString());
 
+                let allowedProjectIds = [];
                 if (req.user.role === 'PM') {
                     const directProjects = await Project.find({
                         companyId: req.user.companyId,
@@ -48,22 +57,37 @@ const getPhotos = async (req, res, next) => {
                         ]
                     }).select('_id').lean();
                     const directProjectIds = directProjects.map(p => p._id.toString());
-                    const allProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
-                    query.projectId = { $in: allProjectIds };
+                    allowedProjectIds = [...new Set([...jobProjectIds, ...directProjectIds])];
                 } else {
-                    query.projectId = { $in: jobProjectIds };
+                    allowedProjectIds = jobProjectIds;
                 }
+
+                if (req.query.projectId) {
+                    if (!allowedProjectIds.includes(req.query.projectId)) {
+                        // If they don't have project assignment, they can still view their own uploads on this project
+                        query.projectId = req.query.projectId;
+                        query.uploadedBy = req.user._id;
+                    } else {
+                        query.projectId = req.query.projectId;
+                        query.$or = [
+                            { uploadedBy: req.user._id },
+                            { projectId: req.query.projectId }
+                        ];
+                    }
+                } else {
+                    query.$or = [
+                        { uploadedBy: req.user._id },
+                        { projectId: { $in: allowedProjectIds } }
+                    ];
+                }
+            }
+        } else {
+            // Admin/Owner can view any project
+            if (req.query.projectId) {
+                query.projectId = req.query.projectId;
             }
         }
 
-        if (req.query.projectId) {
-            if (query.projectId && query.projectId.$in) {
-                if (!query.projectId.$in.includes(req.query.projectId)) {
-                    return res.status(403).json({ message: 'Not authorized for this project' });
-                }
-            }
-            query.projectId = req.query.projectId;
-        }
         if (req.query.taskId) query.taskId = req.query.taskId;
 
         const photos = await Photo.find(query)

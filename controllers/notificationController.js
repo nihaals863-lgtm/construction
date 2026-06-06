@@ -68,7 +68,7 @@ const clearAllNotifications = async (req, res, next) => {
 // @access  Private
 const updateFcmToken = async (req, res, next) => {
     try {
-        const { token, platform } = req.body;
+        const { token, platform, provider = 'fcm' } = req.body;
         if (!token || !platform) {
             res.status(400);
             throw new Error('FCM token and platform are required');
@@ -79,6 +79,7 @@ const updateFcmToken = async (req, res, next) => {
             {
                 userId: req.user._id,
                 platform,
+                provider,
                 isActive: true
             },
             { new: true, upsert: true }

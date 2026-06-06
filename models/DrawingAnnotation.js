@@ -22,7 +22,7 @@ const drawingAnnotationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['highlight', 'comment', 'arrow', 'box', 'text', 'line'],
+        enum: ['highlight', 'comment', 'arrow', 'box', 'text', 'line', 'pen'],
         required: true
     },
     coordinates: {
