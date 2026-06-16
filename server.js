@@ -48,7 +48,13 @@ const server = http.createServer(app);
 // Socket.io Setup
 const io = new Server(server, {
     cors: {
-        origin: ["https://kaal.ca", "http://localhost:5173", "http://localhost:3000"],
+        origin: (origin, callback) => {
+            // Allow all localhost origins in development (any port)
+            if (!origin || process.env.NODE_ENV === 'development') return callback(null, true);
+            const allowed = ["https://kaal.ca", "http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
+            if (allowed.includes(origin)) return callback(null, true);
+            return callback(new Error('Socket CORS: Not allowed by CORS'));
+        },
         methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
         credentials: true
     },
@@ -217,4 +223,21 @@ connectDB().then(() => {
 }).catch(err => {
     console.error('Failed to connect to MongoDB', err);
     process.exit(1);
+});
+
+// Graceful Shutdown for Nodemon and manual restarts
+const gracefulShutdown = () => {
+    console.log('Shutting down server gracefully...');
+    server.close(() => {
+        console.log('Server closed and port released.');
+        process.exit(0);
+    });
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+process.once('SIGUSR2', () => {
+    server.close(() => {
+        process.kill(process.pid, 'SIGUSR2');
+    });
 });

@@ -17,7 +17,8 @@ const {
     reorderProjects,
     getProjectNotes,
     createProjectNote,
-    deleteProjectNote
+    deleteProjectNote,
+    updateProjectNote
 } = require('../controllers/projectController');
 
 const { protect, authorize } = require('../middlewares/authMiddleware');
@@ -46,6 +47,7 @@ router.delete('/:id', authorize('SUPER_ADMIN', 'COMPANY_OWNER'), deleteProject);
 // Project Notes
 router.get('/:id/notes', getProjectNotes);
 router.post('/:id/notes', createProjectNote);
+router.patch('/:id/notes/:noteId', updateProjectNote);
 router.delete('/:id/notes/:noteId', deleteProjectNote);
 
 module.exports = router;

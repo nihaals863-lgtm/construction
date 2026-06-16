@@ -14,7 +14,8 @@ const rolesData = [
     { name: 'FOREMAN', description: 'Forman' },
     { name: 'WORKER', description: 'Worker' },
     { name: 'CLIENT', description: 'Client' },
-    { name: 'SUBCONTRACTOR', description: 'Subcontractor' }
+    { name: 'SUBCONTRACTOR', description: 'Subcontractor' },
+    { name: 'ENGINEER', description: 'Site Engineer' }
 ];
 
 const permissionsData = [
@@ -110,7 +111,8 @@ const seedPermissions = async () => {
             'FOREMAN': ['VIEW_DASHBOARD', 'VIEW_PROJECTS', 'VIEW_TASKS', 'VIEW_DAILY_LOGS', 'VIEW_PHOTOS', 'VIEW_CHAT', 'VIEW_RFI', 'VIEW_EQUIPMENT', 'VIEW_DRAWINGS', 'VIEW_ISSUES', 'CLOCK_IN_CREW', 'VIEW_PROFILE'],
             'WORKER': ['VIEW_DASHBOARD', 'VIEW_TASKS', 'VIEW_CHAT', 'CLOCK_IN_OUT', 'VIEW_PHOTOS', 'VIEW_PROFILE'],
             'CLIENT': ['VIEW_DASHBOARD', 'VIEW_PROJECTS', 'VIEW_RFI', 'VIEW_PHOTOS', 'VIEW_DRAWINGS', 'VIEW_INVOICES', 'VIEW_PROFILE'],
-            'SUBCONTRACTOR': ['VIEW_DASHBOARD', 'VIEW_PROJECTS', 'VIEW_TASKS', 'VIEW_RFI', 'VIEW_PHOTOS', 'VIEW_CHAT']
+            'SUBCONTRACTOR': ['VIEW_DASHBOARD', 'VIEW_PROJECTS', 'VIEW_TASKS', 'VIEW_RFI', 'VIEW_PHOTOS', 'VIEW_CHAT'],
+            'ENGINEER': ['VIEW_DASHBOARD', 'VIEW_PROJECTS', 'VIEW_TASKS', 'VIEW_DRAWINGS', 'VIEW_PHOTOS', 'VIEW_CHAT', 'VIEW_PROFILE']
         };
 
         for (const [roleName, permissionKeys] of Object.entries(rolePermMappings)) {

@@ -730,6 +730,34 @@ const deleteProjectNote = async (req, res, next) => {
     }
 };
 
+// @desc    Update a project note
+// @route   PATCH /api/projects/:id/notes/:noteId
+// @access  Private
+const updateProjectNote = async (req, res, next) => {
+    try {
+        const { content } = req.body;
+        if (!content) {
+            res.status(400);
+            throw new Error('Content is required');
+        }
+
+        const note = await ProjectNote.findOneAndUpdate(
+            { _id: req.params.noteId, companyId: req.user.companyId },
+            { content },
+            { new: true }
+        ).populate('createdBy', 'fullName avatar');
+
+        if (!note) {
+            res.status(404);
+            throw new Error('Note not found');
+        }
+
+        res.json(note);
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getProjects,
     getProjectById,
@@ -747,6 +775,7 @@ module.exports = {
     reorderProjects,
     getProjectNotes,
     createProjectNote,
-    deleteProjectNote
+    deleteProjectNote,
+    updateProjectNote
 };
 

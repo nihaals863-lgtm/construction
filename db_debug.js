@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const fs = require('fs');
 
-const uri = 'mongodb+srv://ankit:Ankit%401205patidar@cluster0.xoxzbbv.mongodb.net/construction-saas';
+const uri = 'mongodb+srv://bard_admin:Bard@Construction2026!!@bard-construction-clust.tarehtj.mongodb.net/?appName=bard-construction-cluster';
 
 async function debug() {
     try {

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const mongoUri = 'mongodb+srv://ankit:Ankit%401205patidar@cluster0.xoxzbbv.mongodb.net/construction-saas';
+const mongoUri = 'mongodb+srv://bard_admin:Bard@Construction2026!!@bard-construction-clust.tarehtj.mongodb.net/?appName=bard-construction-cluster';
 
 async function main() {
     await mongoose.connect(mongoUri);
