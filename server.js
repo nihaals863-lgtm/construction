@@ -211,7 +211,7 @@ app.set('io', io);
 // Error Handler
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3001;
 
 // Connect to Database and Start Server
 connectDB().then(() => {

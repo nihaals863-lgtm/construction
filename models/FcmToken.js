@@ -31,7 +31,7 @@ const fcmTokenSchema = new mongoose.Schema({
 
 // Index for fast query by userId and active status
 fcmTokenSchema.index({ userId: 1, isActive: 1 });
-fcmTokenSchema.index({ token: 1 });
+
 
 const FcmToken = mongoose.model('FcmToken', fcmTokenSchema);
 
