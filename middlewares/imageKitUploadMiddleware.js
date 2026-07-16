@@ -12,12 +12,25 @@ const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
     const allowedExtensions = [
-        '.pdf', '.dwg', '.dxf', '.jpg', '.jpeg', '.png', '.gif', 
+        '.pdf', '.dwg', '.dxf', '.jpg', '.jpeg', '.png', '.gif', '.webp',
         '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', 
         '.txt', '.csv', '.zip', '.rar', '.7z'
     ];
+    const allowedMimeTypes = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/plain', 'text/csv'
+    ];
+    
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedExtensions.includes(ext)) {
+    const mimeOk = allowedMimeTypes.includes(file.mimetype);
+    const extOk = ext === '' || allowedExtensions.includes(ext); // allow no-extension files
+    
+    if (mimeOk || (extOk && ext !== '')) {
         cb(null, true);
     } else {
         cb(new Error(`Invalid file type! Allowed: ${allowedExtensions.join(', ')}`), false);
@@ -50,15 +63,27 @@ const imageKitUpload = async (req, res, next) => {
         else if (req.baseUrl.includes('project-documents')) folder = '/documents';
 
         const uploadPromises = files.map(async (file) => {
+            // Derive extension: prefer from originalname, fall back to MIME type
+            let ext = path.extname(file.originalname);
+            if (!ext) {
+                const mimeToExt = {
+                    'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+                    'image/png': '.png', 'image/gif': '.gif',
+                    'image/webp': '.webp', 'image/heic': '.jpg',
+                    'application/pdf': '.pdf'
+                };
+                ext = mimeToExt[file.mimetype] || '.jpg';
+            }
             const uploadResponse = await imagekit.upload({
                 file: file.buffer,
-                fileName: `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`,
+                fileName: `${file.fieldname}-${Date.now()}${ext}`,
                 folder: `construction_saas${folder}`,
                 useUniqueFileName: true
             });
             
-            // Attach the URL back to the file object
+            // Attach the URL back to the file object so route handler can read it
             file.path = uploadResponse.url;
+            file.mimetype = uploadResponse.fileType || file.mimetype;
             return uploadResponse;
         });
 

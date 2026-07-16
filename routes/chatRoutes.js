@@ -7,7 +7,8 @@ const {
     getUnreadCount,
     markAsRead,
     getOrCreateDirectRoom,
-    getChatUsers
+    getChatUsers,
+    updateMessageAttachments
 } = require('../controllers/chatController');
 const { protect } = require('../middlewares/authMiddleware');
 const { upload, imageKitUpload } = require('../middlewares/imageKitUploadMiddleware');
@@ -76,5 +77,6 @@ router.post('/direct', getOrCreateDirectRoom);
 router.put('/mark-read/:roomId', markAsRead);
 router.get('/:roomId', getRoomMessages);
 router.post('/', sendMessage);
+router.patch('/:messageId/attachments', updateMessageAttachments);
 
 module.exports = router;

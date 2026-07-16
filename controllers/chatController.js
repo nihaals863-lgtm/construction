@@ -153,8 +153,10 @@ async function getUserChatScope(reqUser) {
     const isAdmin = ADMIN_ROLES.includes(role);
 
     if (isAdmin) {
-        const projects = await Project.find({ companyId }).select('_id');
-        const users = await User.find({ companyId, _id: { $ne: reqUser._id }, isActive: true }).select('_id');
+        const [projects, users] = await Promise.all([
+            Project.find({ companyId }).select('_id').lean(),
+            User.find({ companyId, _id: { $ne: reqUser._id }, isActive: true }).select('_id').lean()
+        ]);
         return {
             isAdmin,
             hideInternal: false,
@@ -167,7 +169,7 @@ async function getUserChatScope(reqUser) {
         const pmProjects = await Project.find({ 
             companyId, 
             $or: [{ pmIds: reqUser._id }, { pmId: reqUser._id }, { createdBy: reqUser._id }] 
-        }).select('_id clientId');
+        }).select('_id clientId').lean();
         
         const assignedClientIds = pmProjects.map(p => String(p.clientId)).filter(id => id && id !== 'undefined');
         const assignedProjectIds = pmProjects.map(p => String(p._id));
@@ -179,7 +181,7 @@ async function getUserChatScope(reqUser) {
                 { role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM', 'FOREMAN', 'WORKER', 'SUBCONTRACTOR'] } },
                 { _id: { $in: assignedClientIds } }
             ]
-        }).select('_id');
+        }).select('_id').lean();
         
         return {
             isAdmin: false,
@@ -191,12 +193,12 @@ async function getUserChatScope(reqUser) {
 
     const assignedProjectIds = new Set();
     const [ownedProjects, taskProjects, jobProjects] = await Promise.all([
-        Project.find({ companyId, $or: [{ createdBy: reqUser._id }, { pmIds: reqUser._id }, { pmId: reqUser._id }, { clientId: reqUser._id }] }).select('_id'),
-        Task.find({ companyId, assignedTo: reqUser._id }).select('projectId'),
+        Project.find({ companyId, $or: [{ createdBy: reqUser._id }, { pmIds: reqUser._id }, { pmId: reqUser._id }, { clientId: reqUser._id }] }).select('_id').lean(),
+        Task.find({ companyId, assignedTo: reqUser._id }).select('projectId').lean(),
         Job.find({
             companyId,
             $or: [{ foremanId: reqUser._id }, { assignedWorkers: reqUser._id }, { subcontractorId: reqUser._id }, { createdBy: reqUser._id }]
-        }).select('projectId')
+        }).select('projectId').lean()
     ]);
     ownedProjects.forEach((p) => p?._id && assignedProjectIds.add(String(p._id)));
     taskProjects.forEach((t) => t?.projectId && assignedProjectIds.add(String(t.projectId)));
@@ -209,7 +211,7 @@ async function getUserChatScope(reqUser) {
         directUsersQuery = { ...directUsersQuery, role: { $in: ['COMPANY_OWNER', 'SUPER_ADMIN', 'ADMIN', 'PM'] } };
     } else if (role === 'CLIENT') {
         // Client only sees Admins + PMs assigned to their projects
-        const clientProjects = await Project.find({ companyId, clientId: reqUser._id }).select('pmIds pmId createdBy');
+        const clientProjects = await Project.find({ companyId, clientId: reqUser._id }).select('pmIds pmId createdBy').lean();
         const allowedPMIds = new Set();
         clientProjects.forEach(p => {
             if (p.pmIds && Array.isArray(p.pmIds)) {
@@ -227,7 +229,7 @@ async function getUserChatScope(reqUser) {
             ]
         };
     }
-    const directUsers = await User.find(directUsersQuery).select('_id');
+    const directUsers = await User.find(directUsersQuery).select('_id').lean();
 
     return {
         isAdmin: false,
@@ -267,84 +269,179 @@ const getChatRooms = async (req, res, next) => {
     try {
         const { _id, role } = req.user;
         const scope = await getUserChatScope(req.user);
+        const userIdObj = new mongoose.Types.ObjectId(_id);
 
-        // Fetch rooms where user is a participant
-        const participants = await ChatParticipant.find({ userId: _id })
-            .populate({
-                path: 'roomId',
-                populate: {
-                    path: 'projectId',
-                    select: 'name'
+        const rooms = await ChatParticipant.aggregate([
+            { $match: { userId: userIdObj } },
+            {
+                $lookup: {
+                    from: 'chatrooms',
+                    localField: 'roomId',
+                    foreignField: '_id',
+                    as: 'roomInfo'
                 }
-            });
-
-        const rooms = await Promise.all(participants.map(async (p) => {
-            const room = p.roomId;
-            if (!room) return null;
-
-            // Get last message for preview
-            const lastMessage = await Chat.findOne({ roomId: room._id })
-                .sort({ createdAt: -1 })
-                .populate('sender', 'fullName');
-
-            // Count unread messages
-            const unreadCount = await Chat.countDocuments({
-                roomId: room._id,
-                createdAt: { $gt: p.lastReadAt },
-                sender: { $ne: _id }
-            });
-
-            // For Direct messages, get the other user's name
-            let roomName = room.name || 'Chat Room';
-            let avatar = null;
-            let otherRole = null;
-            let otherUserId = null;
-            let hasClient = false;
-            let hasSub = false;
-
-            const allRoomParticipants = await ChatParticipant.find({ roomId: room._id });
-
-            if (room.roomType === 'DIRECT') {
-                const currentUserIdStr = _id.toString();
-                const other = allRoomParticipants.find(p => p.userId.toString() !== currentUserIdStr);
-
-                if (other) {
-                    const otherUser = await User.findById(other.userId).select('fullName role avatar');
-                    if (otherUser) {
-                        roomName = otherUser.fullName;
-                        avatar = otherUser.avatar;
-                        otherRole = otherUser.role;
-                        otherUserId = otherUser._id;
+            },
+            { $unwind: '$roomInfo' },
+            {
+                $lookup: {
+                    from: 'projects',
+                    localField: 'roomInfo.projectId',
+                    foreignField: '_id',
+                    as: 'projectInfo'
+                }
+            },
+            {
+                $addFields: {
+                    project: { $arrayElemAt: ['$projectInfo', 0] }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'chatparticipants',
+                    localField: 'roomId',
+                    foreignField: 'roomId',
+                    as: 'allParticipants'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    let: { 
+                        participants: '$allParticipants',
+                        me: userIdObj,
+                        roomType: '$roomInfo.roomType'
+                    },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ['$$roomType', 'DIRECT'] },
+                                        { $in: ['$_id', '$$participants.userId'] },
+                                        { $ne: ['$_id', '$$me'] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $project: { fullName: 1, role: 1, avatar: 1 } },
+                        { $limit: 1 }
+                    ],
+                    as: 'otherUserArr'
+                }
+            },
+            {
+                $addFields: {
+                    otherUserDoc: { $arrayElemAt: ['$otherUserArr', 0] }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'chats',
+                    let: { rId: '$roomId', lra: '$lastReadAt', me: userIdObj },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ['$roomId', '$$rId'] },
+                                        { $gt: ['$createdAt', '$$lra'] },
+                                        { $ne: ['$sender', '$$me'] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    as: 'unreadCountArr'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'chats',
+                    let: { rId: '$roomId' },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ['$roomId', '$$rId'] } } },
+                        { $sort: { createdAt: -1 } },
+                        { $limit: 1 },
+                        {
+                            $lookup: {
+                                from: 'users',
+                                localField: 'sender',
+                                foreignField: '_id',
+                                as: 'senderInfo'
+                            }
+                        },
+                        { $unwind: { path: '$senderInfo', preserveNullAndEmptyArrays: true } }
+                    ],
+                    as: 'lastMessageArr'
+                }
+            },
+            {
+                $addFields: {
+                    lastMessageDoc: { $arrayElemAt: ['$lastMessageArr', 0] }
+                }
+            },
+            {
+                $project: {
+                    id: '$roomId',
+                    roomType: '$roomInfo.roomType',
+                    isGroup: '$roomInfo.isGroup',
+                    name: {
+                        $cond: {
+                            if: { $eq: ['$roomInfo.roomType', 'DIRECT'] },
+                            then: { $ifNull: ['$otherUserDoc.fullName', 'Direct Chat'] },
+                            else: { $ifNull: ['$roomInfo.name', 'Chat Room'] }
+                        }
+                    },
+                    avatar: '$otherUserDoc.avatar',
+                    otherRole: '$otherUserDoc.role',
+                    otherUserId: '$otherUserDoc._id',
+                    unreadCount: { $ifNull: [{ $arrayElemAt: ['$unreadCountArr.count', 0] }, 0] },
+                    lastMessage: {
+                        $cond: {
+                            if: { $gt: [{ $size: '$lastMessageArr' }, 0] },
+                            then: {
+                                text: '$lastMessageDoc.message',
+                                sender: '$lastMessageDoc.senderInfo.fullName',
+                                time: '$lastMessageDoc.createdAt'
+                            },
+                            else: null
+                        }
+                    },
+                    projectName: '$project.name',
+                    projectId: '$project._id',
+                    hasClient: {
+                        $gt: [
+                            {
+                                $size: {
+                                    $filter: {
+                                        input: '$allParticipants',
+                                        as: 'part',
+                                        cond: { $eq: ['$$part.roleAtJoining', 'CLIENT'] }
+                                    }
+                                }
+                            },
+                            0
+                        ]
+                    },
+                    hasSub: {
+                        $gt: [
+                            {
+                                $size: {
+                                    $filter: {
+                                        input: '$allParticipants',
+                                        as: 'part',
+                                        cond: { $eq: ['$$part.roleAtJoining', 'SUBCONTRACTOR'] }
+                                    }
+                                }
+                            },
+                            0
+                        ]
                     }
                 }
-            } else {
-                // Check if group/project has client or sub
-                hasClient = allRoomParticipants.some(p => p.roleAtJoining === 'CLIENT');
-                hasSub = allRoomParticipants.some(p => p.roleAtJoining === 'SUBCONTRACTOR');
             }
+        ]);
 
-            return {
-                id: room._id,
-                name: roomName,
-                isGroup: room.isGroup,
-                roomType: room.roomType,
-                projectId: room.projectId?._id,
-                projectName: room.projectId?.name,
-                otherRole,
-                otherUserId,
-                hasClient,
-                hasSub,
-                lastMessage: lastMessage ? {
-                    text: lastMessage.message,
-                    sender: lastMessage.sender ? lastMessage.sender.fullName : 'Deleted User',
-                    time: lastMessage.createdAt
-                } : null,
-                unreadCount,
-                avatar
-            };
-        }));
-
-        // Filter based on scope (hide unauthorized rooms)
         let filteredRooms = rooms.filter((room) => {
             if (!room) return false;
             if (room.roomType === 'INTERNAL' && scope.hideInternal) return false;
@@ -360,13 +457,13 @@ const getChatRooms = async (req, res, next) => {
                 _id: { $in: accessibleClientIds }, 
                 role: 'CLIENT', 
                 isActive: true 
-            }).select('fullName role avatar');
+            }).select('fullName role avatar').lean();
 
             for (const client of allClients) {
                 const alreadyIn = filteredRooms.some(r => r.roomType === 'DIRECT' && String(r.otherUserId) === String(client._id));
                 if (!alreadyIn) {
                     filteredRooms.push({
-                        id: client._id, // Using userId as temp roomId
+                        id: client._id,
                         name: client.fullName,
                         isGroup: false,
                         roomType: 'DIRECT',
@@ -400,49 +497,59 @@ const getRoomMessages = async (req, res, next) => {
     try {
         let { roomId } = req.params;
         const { _id, companyId, role } = req.user;
-        const scope = await getUserChatScope(req.user);
 
         if (!mongoose.Types.ObjectId.isValid(roomId)) {
             res.status(400);
             return next(new Error('Invalid Room ID'));
         }
 
-        // Mobile sends peer user id for DMs; resolve to DIRECT ChatRoom id
-        let roomDoc = await ChatRoom.findById(roomId);
-        if (!roomDoc) {
-            const isProject = await Project.exists({ _id: roomId });
-            if (!isProject) {
-                const peerUser = await User.findById(roomId).select('_id');
-                if (peerUser && peerUser._id.toString() !== _id.toString()) {
-                    try {
-                        const resolved = await resolveDirectChatRoomId(req, peerUser._id);
-                        roomId = resolved.toString();
-                    } catch (err) {
-                        res.status(err.statusCode || 403);
-                        return next(err);
-                    }
+        // 1. Parallel execution of baseline checks to minimize DB roundtrips
+        const [roomDoc, participantDoc, isProject] = await Promise.all([
+            ChatRoom.findById(roomId).lean(),
+            ChatParticipant.findOne({ roomId, userId: _id }).lean(),
+            Project.exists({ _id: roomId })
+        ]);
+
+        let finalRoomId = roomId;
+        let participant = participantDoc;
+
+        if (isProject) {
+            const projectRoom = await ChatRoom.findOne({ projectId: roomId, roomType: 'PROJECT_GROUP' }).lean();
+            if (projectRoom) {
+                finalRoomId = projectRoom._id.toString();
+                participant = await ChatParticipant.findOne({ roomId: finalRoomId, userId: _id }).lean();
+            }
+        } else if (!roomDoc) {
+            // Check if it's a peer user ID (DM resolving)
+            const peerUser = await User.findById(roomId).select('_id').lean();
+            if (peerUser && peerUser._id.toString() !== _id.toString()) {
+                try {
+                    const resolved = await resolveDirectChatRoomId(req, peerUser._id);
+                    finalRoomId = resolved.toString();
+                    // Fetch participant for the newly resolved room
+                    participant = await ChatParticipant.findOne({ roomId: finalRoomId, userId: _id }).lean();
+                } catch (err) {
+                    res.status(err.statusCode || 403);
+                    return next(err);
                 }
             }
         }
 
-        // Verify participation — auto-join if legitimately assigned
-        let participant = await ChatParticipant.findOne({ roomId, userId: _id });
-
+        // 2. Access control and auto-join
         if (!participant) {
-            // Attempt auto-join based on room type
-            const room = await ChatRoom.findById(roomId);
+            const scope = await getUserChatScope(req.user);
+            const room = roomDoc || await ChatRoom.findById(finalRoomId).lean();
             let shouldJoin = false;
 
             if (room) {
                 shouldJoin = await canUserAccessRoom(room, req.user, scope);
-
                 if (shouldJoin) {
                     try {
                         participant = await ChatParticipant.create({
-                            roomId, userId: _id, companyId,
+                            roomId: finalRoomId, userId: _id, companyId,
                             roleAtJoining: role, lastReadAt: new Date()
                         });
-                        console.log(`[Auto-Join Read] User ${_id} (${role}) joined room ${roomId} (${room.roomType})`);
+                        console.log(`[Auto-Join Read] User ${_id} (${role}) joined room ${finalRoomId} (${room.roomType})`);
                     } catch (syncErr) {
                         if (syncErr.code !== 11000) console.error('[Auto-Join Read Error]', syncErr.message);
                     }
@@ -455,11 +562,24 @@ const getRoomMessages = async (req, res, next) => {
             }
         }
 
-        const messages = await Chat.find({ roomId })
-            .sort({ createdAt: 1 })
-            .populate('sender', 'fullName role avatar');
+        const limitVal = parseInt(req.query.limit) || 20;
+        const beforeVal = req.query.before;
+        const afterVal = req.query.after;
 
-        res.json(messages);
+        const query = { roomId: finalRoomId };
+        if (beforeVal) {
+            query.createdAt = { $lt: new Date(beforeVal) };
+        } else if (afterVal) {
+            query.createdAt = { $gt: new Date(afterVal) };
+        }
+
+        const messages = await Chat.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limitVal)
+            .populate('sender', 'fullName role avatar')
+            .lean(); // Speed up response processing
+
+        res.json(messages.reverse());
     } catch (error) {
         next(error);
     }
@@ -472,7 +592,6 @@ const sendMessage = async (req, res, next) => {
     try {
         let { roomId, message, attachments, projectId, receiverId } = req.body;
         const { _id, companyId, role } = req.user;
-        const scope = await getUserChatScope(req.user);
 
         // 1. SMART RESOLUTION (Project -> Room)
         if (roomId && !projectId && mongoose.Types.ObjectId.isValid(roomId)) {
@@ -532,23 +651,33 @@ const sendMessage = async (req, res, next) => {
 
         // 3. AUTHORIZATION CHECK (Comprehensive — handles ALL room types)
         let isAuthorized = false;
+        let roomType = 'DIRECT';
+        let resolvedProjectId = projectId;
 
-        // A. Check explicit participation first (fastest path)
-        let participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+        // A. Check explicit participation first (fastest path — avoids 4-5 expensive database queries)
+        let participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id })
+            .populate('roomId', 'roomType projectId');
+
         if (participant) {
-            const joinedRoom = await ChatRoom.findById(actualRoomId);
-            isAuthorized = await canUserAccessRoom(joinedRoom, req.user, scope);
+            isAuthorized = true;
+            if (participant.roomId) {
+                roomType = participant.roomId.roomType;
+                resolvedProjectId = participant.roomId.projectId || resolvedProjectId;
+            }
         }
 
         // B. If not a participant yet, attempt smart auto-join based on room type
         if (!isAuthorized) {
+            const scope = await getUserChatScope(req.user);
             const room = await ChatRoom.findById(actualRoomId);
 
             if (room) {
                 isAuthorized = await canUserAccessRoom(room, req.user, scope);
+                roomType = room.roomType;
+                resolvedProjectId = room.projectId || resolvedProjectId;
 
                 // AUTO-JOIN: If authorized but not a participant, create the record now
-                if (isAuthorized && !participant) {
+                if (isAuthorized) {
                     try {
                         participant = await ChatParticipant.create({
                             roomId: actualRoomId,
@@ -575,9 +704,7 @@ const sendMessage = async (req, res, next) => {
             return next(new Error('You are not authorized to send messages to this room'));
         }
 
-        const roomForChat = await ChatRoom.findById(actualRoomId).select('roomType');
-        const effectiveProjectId =
-            roomForChat?.roomType === 'DIRECT' ? null : (projectId || null);
+        const effectiveProjectId = roomType === 'DIRECT' ? null : (resolvedProjectId || null);
 
         // 4. CREATE MESSAGE
         const chat = await Chat.create({
@@ -589,16 +716,21 @@ const sendMessage = async (req, res, next) => {
             attachments
         });
 
-        const fullChat = await Chat.findById(chat._id).populate('sender', 'fullName role avatar');
+        // Construct full chat payload in-memory using req.user details to save another MongoDB lookup
+        const fullChat = {
+            ...chat.toObject(),
+            sender: {
+                _id: req.user._id,
+                fullName: req.user.fullName,
+                role: req.user.role,
+                avatar: req.user.avatar
+            }
+        };
 
-        if (!participant) {
-            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
-        }
-
-        // Update sender's lastReadAt if they are a participant
+        // Update sender's lastReadAt asynchronously (non-blocking for HTTP response)
         if (participant) {
             participant.lastReadAt = new Date();
-            await participant.save();
+            participant.save().catch(err => console.error('[lastReadAt Update Error]', err.message));
         }
 
         // 5. REAL-TIME EMISSION
@@ -936,6 +1068,50 @@ const syncProjectParticipants = async (projectId) => {
     }
 };
 
+// @desc    Update message attachments (e.g. resolve upload placeholder)
+// @route   PATCH /api/chat/:messageId/attachments
+// @access  Private
+const updateMessageAttachments = async (req, res, next) => {
+    try {
+        const { messageId } = req.params;
+        const { attachments } = req.body;
+        const userId = req.user._id;
+
+        if (!mongoose.Types.ObjectId.isValid(messageId)) {
+            res.status(400);
+            return next(new Error('Invalid Message ID'));
+        }
+
+        const chat = await Chat.findById(messageId);
+        if (!chat) {
+            res.status(404);
+            return next(new Error('Message not found'));
+        }
+
+        // Verify authorization (only sender can update their message attachments)
+        if (chat.sender.toString() !== userId.toString()) {
+            res.status(403);
+            return next(new Error('You are not authorized to update this message'));
+        }
+
+        // Update attachments
+        chat.attachments = attachments || [];
+        await chat.save();
+
+        const fullChat = await Chat.findById(chat._id).populate('sender', 'fullName role avatar');
+
+        // Real-time Socket.IO emission
+        const io = req.app.get('io');
+        if (io) {
+            io.to(chat.roomId.toString()).emit('message_updated', fullChat);
+        }
+
+        res.json(fullChat);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getChatRooms,
     getRoomMessages,
@@ -945,5 +1121,6 @@ module.exports = {
     getOrCreateDirectRoom,
     getChatUsers,
     syncProjectParticipants,
-    getUserChatScope
+    getUserChatScope,
+    updateMessageAttachments
 };

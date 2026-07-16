@@ -28,7 +28,9 @@ const chatSchema = new mongoose.Schema({
     attachments: [{
         name: String,
         url: String,
-        fileType: String
+        fileType: String,
+        isPending: { type: Boolean, default: false },
+        failed: { type: Boolean, default: false }
     }],
     readBy: [{
         user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
