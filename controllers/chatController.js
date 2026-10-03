@@ -111,6 +111,15 @@ async function getUserProjectScope(userId, companyId, role) {
 }
 
 /**
+ * Helper to get user chat scope object from user request object
+ */
+async function getUserChatScope(userObj) {
+    if (!userObj) return { isAdmin: false, projectIdSet: new Set(), projectNamesMap: new Map() };
+    const { _id, companyId, role } = userObj;
+    return await getUserProjectScope(_id, companyId, role);
+}
+
+/**
  * Validates role-to-role and project-scoped hierarchy rules
  * Server-authoritative permission resolver
  */
@@ -544,9 +553,7 @@ const getChatRooms = async (req, res, next) => {
             }
         }
 
-        const formattedRooms = [];
-
-        for (const room of roomsData) {
+        const roomResults = await Promise.all(roomsData.map(async (room) => {
             const participantRecords = participants.filter(p => String(p.roomId) === String(room._id));
             const lastRead = participantRecords.reduce((maxTime, p) => {
                 const t = p.lastReadAt ? new Date(p.lastReadAt).getTime() : 0;
@@ -554,17 +561,19 @@ const getChatRooms = async (req, res, next) => {
             }, 0);
 
             // Fetch unread count excluding any message sent by current user's cluster IDs
-            const unreadCount = await Chat.countDocuments({
+            const unreadCountPromise = Chat.countDocuments({
                 roomId: room._id,
                 sender: { $nin: clusterUserObjIds },
                 createdAt: { $gt: new Date(lastRead) }
             });
 
             // Fetch latest message
-            const lastMsgDoc = await Chat.findOne({ roomId: room._id })
+            const lastMsgDocPromise = Chat.findOne({ roomId: room._id })
                 .sort({ createdAt: -1 })
                 .populate('sender', 'fullName')
                 .lean();
+
+            const [unreadCount, lastMsgDoc] = await Promise.all([unreadCountPromise, lastMsgDocPromise]);
 
             let lastMessage = null;
             if (lastMsgDoc) {
@@ -581,7 +590,7 @@ const getChatRooms = async (req, res, next) => {
                 const rawParticipants = participantsByRoomId.get(room._id.toString()) || [];
                 const validParticipants = resolveCanonicalContacts(rawParticipants, req.user.companyId);
 
-                formattedRooms.push({
+                return {
                     id: room._id,
                     _id: room._id,
                     roomType: 'PROJECT_GROUP',
@@ -595,12 +604,12 @@ const getChatRooms = async (req, res, next) => {
                     readOnly: !hasActiveAccess,
                     participants: validParticipants,
                     participantCount: validParticipants.length
-                });
+                };
             } else if (room.roomType === 'DIRECT') {
                 // 1. Fetch room participants to verify membership and participant count
                 const allRoomParticipants = await ChatParticipant.find({ roomId: room._id }).populate('userId', 'fullName role avatar isActive email companyId').lean();
                 const isAuthorizedParticipant = allRoomParticipants.some(p => p.userId && clusterUserIds.includes(String(p.userId._id || p.userId)));
-                if (!isAuthorizedParticipant) continue;
+                if (!isAuthorizedParticipant) return null;
 
                 // 2. Resolve intended peer from metadata.directPair if present and valid
                 let targetPeerId = null;
@@ -637,19 +646,17 @@ const getChatRooms = async (req, res, next) => {
                     }
                 }
 
-                if (!targetPeerId) continue;
+                if (!targetPeerId) return null;
 
                 // 4. Resolve canonical identity of peer (aliases -> canonical account)
                 const canonicalOtherId = resolveCanonicalUserId(targetPeerId, req.user.companyId);
                 const otherUser = await User.findById(canonicalOtherId).select('_id fullName role avatar isActive email companyId').lean();
-                if (!otherUser) continue;
+                if (!otherUser) return null;
 
                 // 5. Tenant isolation check: ensure peer belongs to same company
-                if (String(otherUser.companyId) !== String(req.user.companyId)) continue;
+                if (String(otherUser.companyId) !== String(req.user.companyId)) return null;
 
                 // 6. Handle multi-party legacy direct rooms (e.g. legacy Site Foreman participant)
-                // If more than 2 participants exist and viewing user is not an intended directPair member,
-                // present the room transparently as a legacy multi-party thread rather than a normal 1-on-1
                 let roomDisplayName = otherUser.fullName;
                 const isMultiPartyLegacy = allRoomParticipants.length > 2;
 
@@ -665,7 +672,7 @@ const getChatRooms = async (req, res, next) => {
                 const check = await assertHierarchyMessagingAllowed(req.user, otherUser, scope);
                 const isOnline = io ? (io.sockets.adapter.rooms.get(otherUser._id.toString())?.size > 0) : false;
 
-                formattedRooms.push({
+                return {
                     id: room._id,
                     _id: room._id,
                     roomType: 'DIRECT',
@@ -692,9 +699,12 @@ const getChatRooms = async (req, res, next) => {
                     lastMessage,
                     isArchived: !check.allowed,
                     readOnly: !check.allowed
-                });
+                };
             }
-        }
+            return null;
+        }));
+
+        const formattedRooms = roomResults.filter(Boolean);
 
         // Sort by last activity descending
         formattedRooms.sort((a, b) => {
@@ -1372,5 +1382,6 @@ module.exports = {
     updateMessageAttachments,
     syncProjectParticipants,
     getUserProjectScope,
+    getUserChatScope,
     assertHierarchyMessagingAllowed
 };
