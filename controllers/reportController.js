@@ -1416,23 +1416,10 @@ const getSidebarMetrics = async (req, res, next) => {
             let isAuthorized = false;
             if (isGlobalRole) {
                 isAuthorized = true;
-            } else if (room.roomType === 'INTERNAL') {
-                isAuthorized = !scope.hideInternal;
             } else if (room.roomType === 'PROJECT_GROUP') {
                 isAuthorized = room.projectId && scope.projectIdSet.has(String(room.projectId));
             } else if (room.roomType === 'DIRECT') {
-                const pair = room.metadata?.get ? room.metadata.get('directPair') : room.metadata?.directPair;
-                if (pair) {
-                    const otherId = pair.split(':').find(id => id !== String(userId));
-                    if (otherId && scope.directUserIdSet.has(otherId)) {
-                        isAuthorized = true;
-                    }
-                } else {
-                    const others = await ChatParticipant.findOne({ roomId: room._id, userId: { $ne: userId } });
-                    if (others && scope.directUserIdSet.has(String(others.userId))) {
-                        isAuthorized = true;
-                    }
-                }
+                isAuthorized = true;
             }
 
             if (isAuthorized) {

@@ -187,11 +187,28 @@ io.on('connection', async (socket) => {
         }
     });
 
-    // Handle room joining dynamically (e.g. when a new room is created)
-    socket.on('join_room', (roomId) => {
+    // Handle room joining dynamically with server-side authorization check
+    socket.on('join_room', async (roomId) => {
         if (!roomId) return;
-        socket.join(roomId);
-        console.log(`User ${socket.user.userId} joined room manually: ${roomId}`);
+        const ridStr = String(roomId);
+        try {
+            const ChatParticipant = require('./models/ChatParticipant');
+            const mongoose = require('mongoose');
+            if (mongoose.Types.ObjectId.isValid(ridStr)) {
+                const isParticipant = await ChatParticipant.exists({
+                    roomId: ridStr,
+                    userId: socket.user.userId
+                });
+                if (isParticipant || ['COMPANY_OWNER', 'SUPER_ADMIN'].includes(socket.user.role)) {
+                    socket.join(ridStr);
+                    console.log(`[Socket Auth] Authorized User ${socket.user.userId} joined room ${ridStr}`);
+                } else {
+                    console.warn(`[Socket Auth] Rejected unauthorized join attempt by ${socket.user.userId} for room ${ridStr}`);
+                }
+            }
+        } catch (err) {
+            console.error('[Socket Auth Error]:', err.message);
+        }
     });
 
     socket.on('disconnect', () => {

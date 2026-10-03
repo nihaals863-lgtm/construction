@@ -3,10 +3,12 @@ const router = express.Router();
 const {
     getChatRooms,
     getRoomMessages,
+    getRoomParticipants,
     sendMessage,
     getUnreadCount,
     markAsRead,
     getOrCreateDirectRoom,
+    getHierarchyUsers,
     getChatUsers,
     updateMessageAttachments
 } = require('../controllers/chatController');
@@ -72,9 +74,11 @@ router.post('/upload', upload.array('files', 10), imageKitUpload, (req, res) => 
 
 router.get('/rooms', getChatRooms);
 router.get('/unread-count', getUnreadCount);
+router.get('/hierarchy-users', getHierarchyUsers);
 router.get('/users', getChatUsers);
 router.post('/direct', getOrCreateDirectRoom);
 router.put('/mark-read/:roomId', markAsRead);
+router.get('/:roomId/participants', getRoomParticipants);
 router.get('/:roomId', getRoomMessages);
 router.post('/', sendMessage);
 router.patch('/:messageId/attachments', updateMessageAttachments);
