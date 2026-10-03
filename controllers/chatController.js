@@ -48,10 +48,7 @@ async function getUserProjectScope(userId, companyId, role) {
     const isAdmin = ADMIN_ROLES.includes(role);
 
     if (isAdmin) {
-        const allProjects = await Project.find({ companyId: companyIdObj }).select('_id name').lean();
-        const projectIdSet = new Set(allProjects.map(p => String(p._id)));
-        const projectNamesMap = new Map(allProjects.map(p => [String(p._id), p.name || 'Untitled Project']));
-        return { isAdmin: true, projectIdSet, projectNamesMap };
+        return { isAdmin: true, projectIdSet: new Set(), projectNamesMap: new Map() };
     }
 
     if (role === 'PM') {
@@ -1010,16 +1007,18 @@ const sendMessage = async (req, res, next) => {
 
         // Dynamic Authorization
         const scope = await getUserProjectScope(_id, companyId, role);
+        let participant = null;
 
         if (room.roomType === 'PROJECT_GROUP') {
             const canAccess = await canUserAccessRoom(room, req.user, scope);
             if (!canAccess) {
                 return res.status(403).json({ message: 'You are no longer assigned to this project. Room is read-only.' });
             }
+            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
         } else if (room.roomType === 'DIRECT') {
             // SENDER AUTHORIZATION: User must already be an authorized participant of this direct conversation
-            const myParticipant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
-            if (!myParticipant) {
+            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            if (!participant) {
                 return res.status(403).json({ message: 'You are not a participant in this direct conversation.' });
             }
 
@@ -1038,7 +1037,6 @@ const sendMessage = async (req, res, next) => {
         }
 
         // Ensure participant record exists (only auto-created for authorized project groups)
-        let participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
         if (!participant) {
             if (room.roomType === 'DIRECT') {
                 return res.status(403).json({ message: 'Cannot add third participant to a direct conversation.' });
