@@ -979,45 +979,69 @@ const sendMessage = async (req, res, next) => {
             result: null
         });
 
-        // Smart project ID resolution
-        if (roomId && !projectId && mongoose.Types.ObjectId.isValid(roomId)) {
-            const projectExists = await Project.exists({ _id: roomId });
-            if (projectExists) projectId = roomId;
-        }
-
         let actualRoomId = roomId;
+        let room = null;
+        let participant = null;
 
         if (projectId && mongoose.Types.ObjectId.isValid(projectId)) {
-            let room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
+            room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
             if (!room) {
                 await syncProjectParticipants(projectId);
                 room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
             }
-            if (room) actualRoomId = room._id;
+            if (room) {
+                actualRoomId = room._id;
+                participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            }
+        } else if (roomId && mongoose.Types.ObjectId.isValid(roomId)) {
+            // Concurrent lookup of room and participant for normal ChatRoom IDs
+            [room, participant] = await Promise.all([
+                ChatRoom.findById(roomId),
+                ChatParticipant.findOne({ roomId: roomId, userId: _id })
+            ]);
+
+            // Lazy Project fallback: only query Project collection if roomId was not found as a ChatRoom
+            if (!room) {
+                const projectExists = await Project.exists({ _id: roomId });
+                if (projectExists) {
+                    projectId = roomId;
+                    room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
+                    if (!room) {
+                        await syncProjectParticipants(projectId);
+                        room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
+                    }
+                    if (room) {
+                        actualRoomId = room._id;
+                        participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+                    }
+                }
+            }
         }
 
         if (!actualRoomId || !mongoose.Types.ObjectId.isValid(actualRoomId)) {
             return res.status(400).json({ message: 'Valid Room ID is required.' });
         }
 
-        const room = await ChatRoom.findById(actualRoomId);
         if (!room) {
             return res.status(404).json({ message: 'Room not found.' });
         }
 
         // Dynamic Authorization
         const scope = await getUserProjectScope(_id, companyId, role);
-        let participant = null;
 
         if (room.roomType === 'PROJECT_GROUP') {
             const canAccess = await canUserAccessRoom(room, req.user, scope);
             if (!canAccess) {
                 return res.status(403).json({ message: 'You are no longer assigned to this project. Room is read-only.' });
             }
-            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            if (!participant) {
+                participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            }
         } else if (room.roomType === 'DIRECT') {
             // SENDER AUTHORIZATION: User must already be an authorized participant of this direct conversation
-            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            if (!participant) {
+                participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+            }
             if (!participant) {
                 return res.status(403).json({ message: 'You are not a participant in this direct conversation.' });
             }
