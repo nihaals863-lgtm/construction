@@ -66,7 +66,8 @@ const checkUserLimit = async (req, res, next) => {
         const plan = await getPlan(company);
         const userCount = await User.countDocuments({ 
             companyId,
-            role: { $ne: 'CLIENT' } // Usually clients don't count towards seats
+            role: { $ne: 'CLIENT' }, // Usually clients don't count towards seats
+            isActive: { $ne: false }
         });
 
         const maxUsers = plan ? plan.maxUsers : 5; // Default limit for no plan

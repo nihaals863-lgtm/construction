@@ -983,17 +983,7 @@ const sendMessage = async (req, res, next) => {
         let room = null;
         let participant = null;
 
-        if (projectId && mongoose.Types.ObjectId.isValid(projectId)) {
-            room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
-            if (!room) {
-                await syncProjectParticipants(projectId);
-                room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
-            }
-            if (room) {
-                actualRoomId = room._id;
-                participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
-            }
-        } else if (roomId && mongoose.Types.ObjectId.isValid(roomId)) {
+        if (roomId && mongoose.Types.ObjectId.isValid(roomId)) {
             // Concurrent lookup of room and participant for normal ChatRoom IDs
             [room, participant] = await Promise.all([
                 ChatRoom.findById(roomId),
@@ -1015,6 +1005,16 @@ const sendMessage = async (req, res, next) => {
                         participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
                     }
                 }
+            }
+        } else if (projectId && mongoose.Types.ObjectId.isValid(projectId)) {
+            room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
+            if (!room) {
+                await syncProjectParticipants(projectId);
+                room = await ChatRoom.findOne({ projectId, roomType: 'PROJECT_GROUP' });
+            }
+            if (room) {
+                actualRoomId = room._id;
+                participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
             }
         }
 

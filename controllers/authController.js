@@ -356,6 +356,31 @@ const updateUser = async (req, res, next) => {
             throw new Error('Not authorized to update this user');
         }
 
+        // Prevent non-super-admins from assigning SUPER_ADMIN role
+        if (req.body.role === 'SUPER_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+            res.status(403);
+            throw new Error('Not authorized to assign Super Admin role');
+        }
+
+        // If toggling isActive, enforce safeguards
+        if (req.body.isActive === false) {
+            if (req.user._id.toString() === user._id.toString()) {
+                res.status(400);
+                throw new Error('You cannot deactivate your own account.');
+            }
+            if (user.role === 'COMPANY_OWNER') {
+                const rootOwner = await User.findOne({
+                    companyId: user.companyId,
+                    role: 'COMPANY_OWNER'
+                }).sort({ createdAt: 1 }).select('_id');
+
+                if (rootOwner && rootOwner._id.toString() === user._id.toString()) {
+                    res.status(400);
+                    throw new Error('Cannot deactivate the primary company owner account.');
+                }
+            }
+        }
+
         // Update fields
         Object.keys(req.body).forEach(key => {
             if (key !== '_id' && key !== 'companyId') {
@@ -378,7 +403,17 @@ const updateUser = async (req, res, next) => {
     }
 };
 
-// @desc    Delete user
+// Helper to resolve company subscription plan safely
+const getCompanySubscriptionPlan = async (company) => {
+    if (!company || !company.subscriptionPlanId) return null;
+    if (company.subscriptionPlanId.name) return company.subscriptionPlanId;
+    const planQuery = mongoose.Types.ObjectId.isValid(company.subscriptionPlanId)
+        ? { _id: company.subscriptionPlanId }
+        : { name: new RegExp('^' + company.subscriptionPlanId + '$', 'i') };
+    return await Plan.findOne(planQuery);
+};
+
+// @desc    Deactivate user (Safe Soft Deactivation - Preserves all historical records)
 // @route   DELETE /api/auth/users/:id
 // @access  Private (Company Owner or Super Admin)
 const deleteUser = async (req, res, next) => {
@@ -393,11 +428,121 @@ const deleteUser = async (req, res, next) => {
         // Multi-tenant check
         if (req.user.role !== 'SUPER_ADMIN' && req.user.companyId.toString() !== user.companyId.toString()) {
             res.status(403);
-            throw new Error('Not authorized to delete this user');
+            throw new Error('Not authorized to deactivate this user');
         }
 
-        await User.findByIdAndDelete(req.params.id);
-        res.json({ message: 'User removed' });
+        // Prevent self-deactivation
+        if (req.user._id.toString() === user._id.toString()) {
+            res.status(400);
+            throw new Error('You cannot deactivate your own account.');
+        }
+
+        // Prevent deactivating Super Admin accounts unless requester is Super Admin
+        if (user.role === 'SUPER_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+            res.status(403);
+            throw new Error('Not authorized to deactivate a Super Admin account.');
+        }
+
+        // Protect primary root company owner and ensure at least one active owner remains
+        if (user.role === 'COMPANY_OWNER') {
+            const rootOwner = await User.findOne({
+                companyId: user.companyId,
+                role: 'COMPANY_OWNER'
+            }).sort({ createdAt: 1 }).select('_id');
+
+            if (rootOwner && rootOwner._id.toString() === user._id.toString()) {
+                res.status(400);
+                throw new Error('Cannot deactivate the primary company owner account.');
+            }
+
+            const activeOwnerCount = await User.countDocuments({
+                companyId: user.companyId,
+                role: 'COMPANY_OWNER',
+                isActive: true,
+                _id: { $ne: user._id }
+            });
+
+            if (activeOwnerCount === 0) {
+                res.status(400);
+                throw new Error('Cannot deactivate the only active Company Owner account.');
+            }
+        }
+
+        // Soft deactivation - NEVER hard delete
+        user.isActive = false;
+        await user.save();
+
+        res.json({
+            message: 'User deactivated successfully',
+            user: {
+                _id: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                role: user.role,
+                isActive: user.isActive
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Reactivate user (Restore access safely with plan seat validation)
+// @route   PATCH /api/auth/users/:id/reactivate
+// @access  Private (Company Owner or Super Admin)
+const reactivateUser = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.params.id);
+
+        if (!user) {
+            res.status(404);
+            throw new Error('User not found');
+        }
+
+        // Multi-tenant check
+        if (req.user.role !== 'SUPER_ADMIN' && req.user.companyId.toString() !== user.companyId.toString()) {
+            res.status(403);
+            throw new Error('Not authorized to reactivate this user');
+        }
+
+        // Prevent managing Super Admin accounts unless requester is Super Admin
+        if (user.role === 'SUPER_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+            res.status(403);
+            throw new Error('Not authorized to reactivate a Super Admin account.');
+        }
+
+        // Seat limit check for non-client reactivations
+        if (user.role !== 'CLIENT') {
+            const company = await Company.findById(user.companyId);
+            if (company) {
+                const plan = await getCompanySubscriptionPlan(company);
+                const activeCount = await User.countDocuments({
+                    companyId: user.companyId,
+                    role: { $ne: 'CLIENT' },
+                    isActive: { $ne: false },
+                    _id: { $ne: user._id }
+                });
+                const maxUsers = plan ? plan.maxUsers : 5;
+                if (activeCount >= maxUsers && req.user.role !== 'SUPER_ADMIN') {
+                    res.status(403);
+                    throw new Error(`Plan user limit reached (${maxUsers} active members). Upgrade plan to reactivate more users.`);
+                }
+            }
+        }
+
+        user.isActive = true;
+        await user.save();
+
+        res.json({
+            message: 'User reactivated successfully',
+            user: {
+                _id: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                role: user.role,
+                isActive: user.isActive
+            }
+        });
     } catch (error) {
         next(error);
     }
@@ -513,4 +658,4 @@ const updateProfile = async (req, res, next) => {
     }
 };
 
-module.exports = { loginUser, registerUser, registerCompany, getMe, getUsers, updateUser, deleteUser, createUser, updatePassword, updateProfile };
+module.exports = { loginUser, registerUser, registerCompany, getMe, getUsers, updateUser, deleteUser, reactivateUser, createUser, updatePassword, updateProfile };
