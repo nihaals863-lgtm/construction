@@ -22,6 +22,14 @@ const VERIFIED_DUPLICATE_CLUSTERS = [
             '6a5b33f89845db87c7a92641', // Historical duplicate (raj@steelage, 0 msgs)
             '6aae432ece4d83703ab0c45f'  // Historical duplicate (raj@steelage ca, 0 msgs)
         ]
+    },
+    {
+        companyId: '69943f0fe2e8450ab883bdfb', // Company: Jay
+        canonicalUserId: '6abe1c27ce4d83703ae01cde', // Dilber (Owner - dilber@kaal.ca)
+        aliasUserIds: [
+            '6abb6f8bce4d83703ad7ba33', // Historical duplicate (dilbar@kaal.ca)
+            '6aca042387c80bf9ff100f2e'  // Historical duplicate (dilber@kaal.com)
+        ]
     }
 ];
 
