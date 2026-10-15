@@ -403,18 +403,37 @@ const getOrCreateDirectRoom = async (req, res, next) => {
                 const u1 = new mongoose.Types.ObjectId(req.user._id);
                 // Also search across any cluster IDs for historical backward compatibility
                 const clusterIds = getClusterUserIds(canonicalTargetId, req.user.companyId).map(id => new mongoose.Types.ObjectId(id));
-                const commonRooms = await ChatParticipant.aggregate([
-                    { $match: { userId: { $in: [u1, ...clusterIds] } } },
-                    { $group: { _id: '$roomId', count: { $sum: 1 } } },
+                const targetIdSet = new Set(clusterIds.map(String));
+
+                // Find historical rooms with EXACTLY 2 participants
+                const potentialRooms = await ChatParticipant.aggregate([
+                    { $group: { _id: '$roomId', userIds: { $push: '$userId' }, count: { $sum: 1 } } },
                     { $match: { count: 2 } }
                 ]);
-                if (commonRooms.length > 0) {
-                    const cIds = commonRooms.map(r => r._id);
+
+                const matchingRoomIds = [];
+                for (const pr of potentialRooms) {
+                    const userStr0 = String(pr.userIds[0]);
+                    const userStr1 = String(pr.userIds[1]);
+                    const hasU1 = (userStr0 === String(u1) || userStr1 === String(u1));
+                    const hasTarget = (targetIdSet.has(userStr0) || targetIdSet.has(userStr1));
+                    if (hasU1 && hasTarget) {
+                        matchingRoomIds.push(pr._id);
+                    }
+                }
+
+                if (matchingRoomIds.length > 0) {
                     room = await ChatRoom.findOne({
-                        _id: { $in: cIds },
+                        _id: { $in: matchingRoomIds },
                         companyId: req.user.companyId,
                         roomType: 'DIRECT',
-                        isActive: { $ne: false }
+                        isActive: { $ne: false },
+                        $or: [
+                            { 'metadata.directPair': { $exists: false } },
+                            { 'metadata.directPair': null },
+                            { 'metadata.directPair': '' },
+                            { 'metadata.directPair': pairKey }
+                        ]
                     }).sort({ createdAt: 1 });
                     if (room) {
                         if (!room.metadata) room.metadata = new Map();
@@ -464,14 +483,30 @@ const getOrCreateDirectRoom = async (req, res, next) => {
             inFlightDirectRoomPromises.delete(pairKey);
         }
 
+        // Ensure strictly only the authorized pair exists in DIRECT room
+        const roomParts = await ChatParticipant.find({ roomId: room._id });
+        const allowedUserIds = new Set([
+            String(req.user._id),
+            String(targetUser._id),
+            ...getClusterUserIds(req.user._id, req.user.companyId).map(String),
+            ...getClusterUserIds(targetUser._id, req.user.companyId).map(String)
+        ]);
+
+        // Remove any rogue participant who doesn't belong to this direct pair
+        for (const p of roomParts) {
+            if (!allowedUserIds.has(String(p.userId))) {
+                await ChatParticipant.deleteOne({ _id: p._id }).catch(() => {});
+            }
+        }
+
         // Ensure both participant records exist
         const p1 = await ChatParticipant.findOne({ roomId: room._id, userId: req.user._id });
         if (!p1) {
-            await ChatParticipant.create({ roomId: room._id, userId: req.user._id, companyId: req.user.companyId, roleAtJoining: req.user.role });
+            await ChatParticipant.create({ roomId: room._id, userId: req.user._id, companyId: req.user.companyId, roleAtJoining: req.user.role }).catch(() => {});
         }
         const p2 = await ChatParticipant.findOne({ roomId: room._id, userId: targetUser._id });
         if (!p2) {
-            await ChatParticipant.create({ roomId: room._id, userId: targetUser._id, companyId: req.user.companyId, roleAtJoining: targetUser.role });
+            await ChatParticipant.create({ roomId: room._id, userId: targetUser._id, companyId: req.user.companyId, roleAtJoining: targetUser.role }).catch(() => {});
         }
 
         const io = req.app?.get ? req.app.get('io') : null;
@@ -1120,7 +1155,16 @@ const sendMessage = async (req, res, next) => {
             // Handle in-app and push notifications for other participants
             const notifyOthers = async () => {
                 const participantsList = await ChatParticipant.find({ roomId: actualRoomId }).lean();
-                const otherParticipants = participantsList.filter(p => String(p.userId) !== String(_id));
+                let otherParticipants = participantsList.filter(p => String(p.userId) !== String(_id));
+
+                if (room.roomType === 'DIRECT') {
+                    const directPairStr = (room.metadata instanceof Map ? room.metadata.get('directPair') : room.metadata?.directPair);
+                    if (typeof directPairStr === 'string' && directPairStr.includes(':')) {
+                        const pairIds = directPairStr.split(':').map(s => s.trim());
+                        otherParticipants = otherParticipants.filter(p => pairIds.includes(String(p.userId)));
+                    }
+                }
+
                 const otherUserIds = otherParticipants.map(p => p.userId);
 
                 if (otherUserIds.length === 0) return;
