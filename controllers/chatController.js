@@ -789,10 +789,32 @@ const getRoomMessages = async (req, res, next) => {
         }
 
         // Authorization check: User must be a participant in this room
-        const isParticipant = await ChatParticipant.exists({
+        let isParticipant = await ChatParticipant.exists({
             roomId: finalRoomId,
             userId: _id
         });
+
+        // Canonical self-healing for separated/redirected DIRECT rooms (stale client cache recovery)
+        if (!isParticipant && room.roomType === 'DIRECT') {
+            const allParts = await ChatParticipant.find({ roomId: finalRoomId }).lean();
+            for (const p of allParts) {
+                if (String(p.userId) !== String(_id)) {
+                    const targetId = resolveCanonicalUserId(p.userId, companyId);
+                    const pairKey = [String(_id), String(targetId)].sort().join(':');
+                    const canonRoom = await ChatRoom.findOne({
+                        companyId,
+                        roomType: 'DIRECT',
+                        isActive: { $ne: false },
+                        'metadata.directPair': pairKey
+                    });
+                    if (canonRoom) {
+                        finalRoomId = canonRoom._id;
+                        isParticipant = await ChatParticipant.exists({ roomId: finalRoomId, userId: _id });
+                        break;
+                    }
+                }
+            }
+        }
 
         if (!isParticipant && !ADMIN_ROLES.includes(role)) {
             return res.status(403).json({ message: 'You are not authorized to view messages in this conversation.' });
@@ -1077,6 +1099,30 @@ const sendMessage = async (req, res, next) => {
             if (!participant) {
                 participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
             }
+
+            // Canonical self-healing for separated/redirected DIRECT rooms (stale client cache recovery)
+            if (!participant) {
+                const allParts = await ChatParticipant.find({ roomId: actualRoomId }).lean();
+                for (const p of allParts) {
+                    if (String(p.userId) !== String(_id)) {
+                        const targetId = resolveCanonicalUserId(p.userId, companyId);
+                        const pairKey = [String(_id), String(targetId)].sort().join(':');
+                        const canonRoom = await ChatRoom.findOne({
+                            companyId,
+                            roomType: 'DIRECT',
+                            isActive: { $ne: false },
+                            'metadata.directPair': pairKey
+                        });
+                        if (canonRoom) {
+                            actualRoomId = canonRoom._id;
+                            room = canonRoom;
+                            participant = await ChatParticipant.findOne({ roomId: actualRoomId, userId: _id });
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (!participant) {
                 return res.status(403).json({ message: 'You are not a participant in this direct conversation.' });
             }

@@ -18,9 +18,5 @@ router.patch('/profile', protect, upload.single('avatar'), updateProfile);
 router.patch('/updatepassword', protect, updatePassword);
 router.delete('/users/:id', protect, authorize('SUPER_ADMIN', 'COMPANY_OWNER'), deleteUser);
 
-
-
-
-
 module.exports = router;
 

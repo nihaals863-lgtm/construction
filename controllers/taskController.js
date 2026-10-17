@@ -781,7 +781,12 @@ const updateTask = async (req, res, next) => {
         const updates = { ...req.body };
         if (updates.startDate) updates.startDate = normalizeDateToUTC(updates.startDate);
         if (updates.dueDate) updates.dueDate = normalizeDateToUTC(updates.dueDate);
-        if (updates.assignedTo === "") updates.assignedTo = [];
+        if (updates.assignedTo === "" || updates.assignedTo === null) {
+            updates.assignedTo = modelType === 'Task' ? [] : null;
+        }
+        if (updates.parentTaskId === "" || updates.parentTaskId === "NONE" || !updates.parentTaskId) {
+            updates.parentTaskId = null;
+        }
 
         Object.assign(task, updates);
         let hierarchyMoved = false;
@@ -810,8 +815,14 @@ const updateTask = async (req, res, next) => {
             hierarchyMoved = true;
         }
         // Re-resolve assignedTo as array
-        if (updates.assignedTo && !Array.isArray(updates.assignedTo)) {
-            task.assignedTo = [updates.assignedTo].filter(Boolean);
+        if (modelType === 'Task') {
+            if (updates.assignedTo && !Array.isArray(updates.assignedTo)) {
+                task.assignedTo = [updates.assignedTo].filter(Boolean);
+            } else if (updates.assignedTo === null || updates.assignedTo === undefined || updates.assignedTo === '') {
+                if (req.body.assignedTo !== undefined) {
+                    task.assignedTo = [];
+                }
+            }
         }
 
         await task.save();
@@ -849,6 +860,7 @@ const updateTask = async (req, res, next) => {
              if ((req.body.startDate && String(oldStartDate) !== String(task.startDate)) || 
                  (req.body.dueDate && String(oldDueDate) !== String(task.dueDate))) {
                  const shiftDependencies = async (currId, newStart, newDue) => {
+                     if (!newDue || isNaN(new Date(newDue).getTime())) return;
                      const deps = await Task.find({ dependencies: currId, companyId });
                      for (const dep of deps) {
                          if (!dep.startDate || !dep.dueDate) continue;
@@ -897,6 +909,9 @@ const updateTask = async (req, res, next) => {
         if (error.name === 'ValidationError') {
             const messages = Object.values(error.errors).map(val => val.message);
             return res.status(400).json({ message: 'Validation Failed', errors: messages });
+        }
+        if (error.name === 'CastError') {
+            return res.status(400).json({ message: `Invalid ID format for ${error.path}: ${error.value}` });
         }
         console.error('[updateTask] Critical Error:', error);
         next(error);

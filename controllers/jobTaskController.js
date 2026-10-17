@@ -225,7 +225,8 @@ const updateJobTask = async (req, res) => {
             // Normalize status and priority if they exist in body
             if (updates.status === 'todo') updates.status = 'pending';
             if (updates.priority) updates.priority = updates.priority.toLowerCase();
-            if (updates.assignedTo === "") updates.assignedTo = null;
+            if (updates.assignedTo === "" || updates.assignedTo === null) updates.assignedTo = null;
+            if (updates.parentTaskId !== undefined) delete updates.parentTaskId;
             
             Object.assign(task, updates);
             if (updates.assignedTo && req.user.role === 'FOREMAN' && !task.assignedForeman) {
