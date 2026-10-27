@@ -25,7 +25,17 @@ const getDailyLogs = async (req, res, next) => {
             }
             query.projectId = req.query.projectId;
         }
-        if (req.query.date) query.date = req.query.date;
+        if (req.query.date) {
+            const dateStr = String(req.query.date).split('T')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                const startOfDay = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0));
+                const endOfDay = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 23, 59, 59, 999));
+                query.date = { $gte: startOfDay, $lte: endOfDay };
+            } else {
+                query.date = req.query.date;
+            }
+        }
 
         const logs = await DailyLog.find(query)
             .populate('projectId', 'name')
@@ -54,6 +64,14 @@ const createDailyLog = async (req, res, next) => {
             companyId: req.user.companyId,
             reportedBy: req.user._id
         };
+
+        if (req.body.date) {
+            const dateStr = String(req.body.date).split('T')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                logData.date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0));
+            }
+        }
 
         // Handle fields that might be stringified JSON from multipart/form-data
         const jsonFields = ['location', 'manpower', 'weather', 'materialsReceived', 'equipmentUsed', 'visitors'];
@@ -132,6 +150,14 @@ const updateDailyLog = async (req, res, next) => {
             ...req.body,
             photos
         };
+
+        if (req.body.date) {
+            const dateStr = String(req.body.date).split('T')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                updateData.date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0));
+            }
+        }
 
         // Handle fields that might be stringified JSON from multipart/form-data
         const jsonFields = ['location', 'manpower', 'weather', 'materialsReceived', 'equipmentUsed', 'visitors'];
